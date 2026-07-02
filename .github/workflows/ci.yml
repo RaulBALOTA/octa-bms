@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  DATABASE_URL: postgresql://octa:octa@localhost:5432/octa_bms
+
+jobs:
+  quality:
+    name: Lint · Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: octa
+          POSTGRES_PASSWORD: octa
+          POSTGRES_DB: octa_bms
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U octa"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Prisma validate & generate
+        run: |
+          pnpm --filter @octa-bms/api exec prisma validate
+          pnpm --filter @octa-bms/api prisma:generate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Push schema to test database
+        run: pnpm --filter @octa-bms/api exec prisma db push
+
+      - name: Seed smoke test
+        run: pnpm --filter @octa-bms/api prisma:seed
+
+      - name: Build
+        run: pnpm build
+
+      - name: Security audit (non-blocking report)
+        run: pnpm audit --audit-level high || true
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    needs: quality
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}/bms-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}/bms-web:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Deployment (staging → approval → production) is environment-specific;
+  # see docs/19-cicd-pipeline.md for the target flow.

@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 20% 98%;
+  --foreground: 224 20% 12%;
+  --card: 0 0% 100%;
+  --border: 220 13% 89%;
+  --muted: 220 14% 94%;
+  --muted-foreground: 220 9% 45%;
+  --primary: 221 83% 53%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 221 83% 95%;
+  --destructive: 0 72% 51%;
+  --success: 142 71% 38%;
+  --warning: 38 92% 45%;
+}
+
+.dark {
+  --background: 224 22% 9%;
+  --foreground: 220 14% 92%;
+  --card: 224 20% 12%;
+  --border: 222 14% 21%;
+  --muted: 223 16% 16%;
+  --muted-foreground: 220 9% 60%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 224 22% 9%;
+  --accent: 221 50% 18%;
+  --destructive: 0 72% 55%;
+  --success: 142 60% 45%;
+  --warning: 38 92% 55%;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-size: 13.5px;
+  font-family: 'Inter Variable', Inter, system-ui, sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* slim scrollbars, both themes */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

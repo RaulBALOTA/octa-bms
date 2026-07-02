@@ -1,0 +1,2505 @@
+// =====================================================================
+// OCTA Business Management System — Database Schema
+// PostgreSQL 16 · Prisma ORM
+//
+// Conventions
+//  - Every business entity carries: createdAt/updatedAt, createdById/
+//    updatedById (audit), deletedAt (soft delete), companyId (multi-company)
+//  - History is captured in AuditLog (field-level change tracking) plus
+//    explicit version tables where legal traceability is required
+//    (ContractVersion, DocumentVersion, ArticleVersion, ProposalVersion)
+//  - Cross-cutting features (tags, comments, attachments, custom fields,
+//    favorites, saved views, activity timeline) use polymorphic
+//    entityType/entityId references
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// 1. IDENTITY & ACCESS MANAGEMENT
+// =====================================================================
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  passwordHash      String?   // null when SSO-only
+  entraObjectId     String?   @unique // Azure Entra ID SSO
+  firstName         String
+  lastName          String
+  displayName       String?
+  avatarUrl         String?
+  locale            String    @default("de") // de | en
+  timeZone          String    @default("Europe/Berlin")
+  theme             String    @default("system") // light | dark | system
+  isActive          Boolean   @default(true)
+  isSystemAdmin     Boolean   @default(false)
+  mfaEnabled        Boolean   @default(false)
+  mfaSecret         String?
+  lastLoginAt       DateTime?
+  passwordChangedAt DateTime?
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  memberships     CompanyMembership[]
+  userRoles       UserRole[]
+  userGroups      UserGroup[]
+  apiKeys         ApiKey[]
+  refreshTokens   RefreshToken[]
+  notifications   Notification[]
+  favorites       Favorite[]
+  savedViews      SavedView[]
+  auditLogs       AuditLog[]
+  activities      ActivityLog[]
+  comments        Comment[]
+  employee        Employee?
+  assignedTasks   Task[]              @relation("TaskAssignee")
+  createdTasks    Task[]              @relation("TaskCreator")
+  approvalActions ApprovalAction[]
+
+  @@index([email])
+  @@index([isActive])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  code        String  @unique // e.g. "FINANCE_MANAGER"
+  name        String
+  nameDe      String?
+  description String?
+  isSystem    Boolean @default(false) // built-in, non-deletable
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  permissions RolePermission[]
+  userRoles   UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id       String @id @default(cuid())
+  code     String @unique // "crm.clients.read" | "finance.invoices.approve"
+  module   String // "crm", "finance", ...
+  resource String // "clients", "invoices", ...
+  action   String // "read" | "create" | "update" | "delete" | "approve" | "export"
+  name     String
+
+  rolePermissions RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// Role assignment scoped to a company (and optionally office/department)
+model UserRole {
+  id           String  @id @default(cuid())
+  userId       String
+  roleId       String
+  companyId    String?
+  officeId     String?
+  departmentId String?
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  company    Company?    @relation(fields: [companyId], references: [id])
+  office     Office?     @relation(fields: [officeId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+
+  @@unique([userId, roleId, companyId, officeId, departmentId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+model Group {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  companyId   String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company Company?    @relation(fields: [companyId], references: [id])
+  members UserGroup[]
+
+  @@map("groups")
+}
+
+model UserGroup {
+  userId  String
+  groupId String
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+  @@map("user_groups")
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  keyHash    String    @unique
+  prefix     String // first 8 chars, shown in UI
+  scopes     String[] // permission codes
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+model CompanyMembership {
+  id        String  @id @default(cuid())
+  userId    String
+  companyId String
+  isDefault Boolean @default(false)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@map("company_memberships")
+}
+
+// =====================================================================
+// 2. MASTER DATA — ORGANIZATION
+// =====================================================================
+
+model Company {
+  id                 String  @id @default(cuid())
+  code               String  @unique // "OCTA-DE"
+  name               String
+  legalName          String?
+  legalForm          String? // GmbH, AG, GmbH & Co. KG
+  vatId              String? // USt-IdNr.
+  taxNumber          String? // Steuernummer
+  commercialRegister String? // HRB 12345, Amtsgericht München
+  street             String?
+  postalCode         String?
+  city               String?
+  countryCode        String?
+  phone              String?
+  email              String?
+  website            String?
+  logoUrl            String?
+  defaultCurrency    String  @default("EUR")
+  defaultLocale      String  @default("de")
+  fiscalYearStart    Int     @default(1) // month
+  isActive           Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  country          Country?            @relation(fields: [countryCode], references: [code])
+  offices          Office[]
+  departments      Department[]
+  businessUnits    BusinessUnit[]
+  costCenters      CostCenter[]
+  profitCenters    ProfitCenter[]
+  memberships      CompanyMembership[]
+  userRoles        UserRole[]
+  groups           Group[]
+  employees        Employee[]
+  businessPartners BusinessPartner[]
+  bankAccounts     BankAccount[]
+  contracts        Contract[]
+  invoices         Invoice[]
+  budgets          Budget[]
+  assets           Asset[]
+  opportunities    Opportunity[]
+  proposals        Proposal[]
+  purchaseRequests PurchaseRequest[]
+  purchaseOrders   PurchaseOrder[]
+  announcements    Announcement[]
+  companyGoals     CompanyGoal[]
+
+  @@map("companies")
+}
+
+model Office {
+  id          String  @id @default(cuid())
+  companyId   String
+  code        String
+  name        String
+  street      String?
+  postalCode  String?
+  city        String?
+  countryCode String?
+  phone       String?
+  email       String?
+  latitude    Float?
+  longitude   Float?
+  isHQ        Boolean @default(false)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company   Company    @relation(fields: [companyId], references: [id])
+  country   Country?   @relation(fields: [countryCode], references: [code])
+  employees Employee[]
+  userRoles UserRole[]
+
+  @@unique([companyId, code])
+  @@map("offices")
+}
+
+model Department {
+  id             String  @id @default(cuid())
+  companyId      String
+  businessUnitId String?
+  parentId       String?
+  code           String
+  name           String
+  nameDe         String?
+  managerId      String? // Employee
+  costCenterId   String?
+  isActive       Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  businessUnit BusinessUnit? @relation(fields: [businessUnitId], references: [id])
+  parent       Department?   @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+  children     Department[]  @relation("DepartmentHierarchy")
+  manager      Employee?     @relation("DepartmentManager", fields: [managerId], references: [id])
+  costCenter   CostCenter?   @relation(fields: [costCenterId], references: [id])
+  employees    Employee[]
+  positions    Position[]
+  userRoles    UserRole[]
+
+  @@unique([companyId, code])
+  @@map("departments")
+}
+
+model BusinessUnit {
+  id        String  @id @default(cuid())
+  companyId String
+  code      String
+  name      String
+  leadId    String? // Employee
+  isActive  Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company     Company      @relation(fields: [companyId], references: [id])
+  lead        Employee?    @relation(fields: [leadId], references: [id])
+  departments Department[]
+
+  @@unique([companyId, code])
+  @@map("business_units")
+}
+
+model CostCenter {
+  id          String  @id @default(cuid())
+  companyId   String
+  code        String
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company     Company      @relation(fields: [companyId], references: [id])
+  departments Department[]
+  budgetLines BudgetLine[]
+  invoiceLines InvoiceLine[]
+
+  @@unique([companyId, code])
+  @@map("cost_centers")
+}
+
+model ProfitCenter {
+  id        String  @id @default(cuid())
+  companyId String
+  code      String
+  name      String
+  isActive  Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, code])
+  @@map("profit_centers")
+}
+
+// =====================================================================
+// 3. MASTER DATA — REFERENCE
+// =====================================================================
+
+model Country {
+  code     String @id // ISO 3166-1 alpha-2
+  name     String
+  nameDe   String
+  isEU     Boolean @default(false)
+  phoneCode String?
+
+  companies        Company[]
+  offices          Office[]
+  businessPartners BusinessPartner[]
+
+  @@map("countries")
+}
+
+model Currency {
+  code           String @id // ISO 4217
+  name           String
+  symbol         String
+  decimalPlaces  Int    @default(2)
+  isActive       Boolean @default(true)
+
+  exchangeRates ExchangeRate[]
+
+  @@map("currencies")
+}
+
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  currencyCode String
+  rateToEUR    Decimal  @db.Decimal(18, 8)
+  validFrom    DateTime
+
+  currency Currency @relation(fields: [currencyCode], references: [code])
+
+  @@unique([currencyCode, validFrom])
+  @@map("exchange_rates")
+}
+
+model LanguageRef {
+  code   String @id // ISO 639-1
+  name   String
+  nameDe String
+
+  @@map("languages")
+}
+
+model TaxCode {
+  id          String  @id @default(cuid())
+  code        String  @unique // "DE-19", "DE-7", "DE-0-13B"
+  name        String
+  ratePercent Decimal @db.Decimal(5, 2)
+  countryCode String  @default("DE")
+  type        String  @default("VAT") // VAT | REVERSE_CHARGE | EXEMPT | INTRA_EU
+  datevCode   String? // DATEV BU-Schlüssel
+  isActive    Boolean @default(true)
+
+  invoiceLines InvoiceLine[]
+
+  @@map("tax_codes")
+}
+
+model ContractTypeRef {
+  id       String  @id @default(cuid())
+  code     String  @unique
+  name     String
+  nameDe   String?
+  category String // CLIENT | SUPPLIER | FRAMEWORK | NDA | EMPLOYMENT | INSURANCE
+  isActive Boolean @default(true)
+
+  contracts Contract[]
+
+  @@map("contract_types")
+}
+
+model DocumentTypeRef {
+  id              String  @id @default(cuid())
+  code            String  @unique
+  name            String
+  nameDe          String?
+  retentionYears  Int? // German GoBD: 6 or 10 years
+  requiresApproval Boolean @default(false)
+  isActive        Boolean @default(true)
+
+  documents Document[]
+
+  @@map("document_types")
+}
+
+model AssetCategory {
+  id                String  @id @default(cuid())
+  code              String  @unique
+  name              String
+  nameDe            String?
+  depreciationYears Int?
+  requiresCalibration Boolean @default(false)
+  isActive          Boolean @default(true)
+
+  assets Asset[]
+
+  @@map("asset_categories")
+}
+
+model VehicleType {
+  id       String  @id @default(cuid())
+  code     String  @unique
+  name     String
+  isActive Boolean @default(true)
+
+  @@map("vehicle_types")
+}
+
+model Bank {
+  id       String  @id @default(cuid())
+  bic      String  @unique
+  name     String
+  city     String?
+  countryCode String?
+
+  bankAccounts BankAccount[]
+
+  @@map("banks")
+}
+
+model BankAccount {
+  id            String  @id @default(cuid())
+  companyId     String
+  bankId        String?
+  name          String
+  iban          String  @unique
+  bic           String?
+  currencyCode  String  @default("EUR")
+  openingBalance Decimal @default(0) @db.Decimal(18, 2)
+  isActive      Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company  Company   @relation(fields: [companyId], references: [id])
+  bank     Bank?     @relation(fields: [bankId], references: [id])
+  payments Payment[]
+
+  @@map("bank_accounts")
+}
+
+model ApprovalGroup {
+  id        String  @id @default(cuid())
+  name      String
+  memberIds String[] // User ids
+  minApprovals Int  @default(1)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("approval_groups")
+}
+
+model EmailTemplate {
+  id        String  @id @default(cuid())
+  code      String  @unique
+  name      String
+  subjectDe String
+  subjectEn String
+  bodyDe    String
+  bodyEn    String
+  module    String?
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("email_templates")
+}
+
+// =====================================================================
+// 4. CRM — BUSINESS PARTNERS & ACTIVITIES
+// =====================================================================
+
+enum PartnerType {
+  CLIENT
+  SUPPLIER
+  PARTNER
+  AUTHORITY
+}
+
+enum PartnerStatus {
+  LEAD
+  PROSPECT
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+model BusinessPartner {
+  id             String        @id @default(cuid())
+  companyId      String
+  partnerNumber  String // auto "C-00001" / "S-00001"
+  type           PartnerType
+  status         PartnerStatus @default(ACTIVE)
+  name           String
+  legalName      String?
+  legalForm      String?
+  vatId          String?
+  industryCode   String? // WZ 2008 classification
+  segment        String? // A | B | C customer segmentation
+  website        String?
+  email          String?
+  phone          String?
+  street         String?
+  postalCode     String?
+  city           String?
+  countryCode    String?
+  latitude       Float?
+  longitude      Float?
+  paymentTermDays Int?
+  currencyCode   String        @default("EUR")
+  creditLimit    Decimal?      @db.Decimal(18, 2)
+  accountManagerId String? // Employee
+  rating         Int? // 1-5 supplier evaluation aggregate
+  notes          String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  company        Company              @relation(fields: [companyId], references: [id])
+  country        Country?             @relation(fields: [countryCode], references: [code])
+  accountManager Employee?            @relation(fields: [accountManagerId], references: [id])
+  contacts       Contact[]
+  crmActivities  CrmActivity[]
+  opportunities  Opportunity[]
+  contracts      Contract[]
+  invoices       Invoice[]
+  evaluations    SupplierEvaluation[]
+  purchaseOrders PurchaseOrder[]
+  legalCases     LegalCase[]
+
+  @@unique([companyId, partnerNumber])
+  @@index([companyId, type])
+  @@index([name])
+  @@map("business_partners")
+}
+
+model Contact {
+  id          String  @id @default(cuid())
+  partnerId   String
+  salutation  String? // Herr | Frau
+  title       String? // Dr., Dipl.-Ing.
+  firstName   String
+  lastName    String
+  position    String?
+  department  String?
+  email       String?
+  phone       String?
+  mobile      String?
+  linkedIn    String?
+  isPrimary   Boolean @default(false)
+  birthday    DateTime?
+  language    String  @default("de")
+  gdprConsent Boolean @default(false)
+  gdprConsentDate DateTime?
+  notes       String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  partner       BusinessPartner @relation(fields: [partnerId], references: [id])
+  crmActivities CrmActivity[]
+
+  @@index([partnerId])
+  @@index([lastName, firstName])
+  @@map("contacts")
+}
+
+enum CrmActivityType {
+  CALL
+  EMAIL
+  MEETING
+  VISIT
+  TASK
+  NOTE
+}
+
+model CrmActivity {
+  id            String          @id @default(cuid())
+  partnerId     String
+  contactId     String?
+  opportunityId String?
+  type          CrmActivityType
+  subject       String
+  description   String?
+  activityDate  DateTime
+  durationMin   Int?
+  location      String?
+  outcome       String?
+  ownerId       String? // Employee; null when logged by a non-employee user
+  isCompleted   Boolean         @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  partner     BusinessPartner @relation(fields: [partnerId], references: [id])
+  contact     Contact?        @relation(fields: [contactId], references: [id])
+  opportunity Opportunity?    @relation(fields: [opportunityId], references: [id])
+  owner       Employee?       @relation(fields: [ownerId], references: [id])
+
+  @@index([partnerId, activityDate])
+  @@map("crm_activities")
+}
+
+// =====================================================================
+// 5. SALES — OPPORTUNITIES & PROPOSALS
+// =====================================================================
+
+enum OpportunityStage {
+  LEAD
+  QUALIFIED
+  GO_NO_GO
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+  CANCELLED
+}
+
+model Opportunity {
+  id               String           @id @default(cuid())
+  companyId        String
+  partnerId        String
+  opportunityNumber String
+  title            String
+  description      String?
+  stage            OpportunityStage @default(LEAD)
+  estimatedValue   Decimal?         @db.Decimal(18, 2)
+  currencyCode     String           @default("EUR")
+  probability      Int              @default(10) // %
+  expectedAward    DateTime?
+  submissionDeadline DateTime?
+  serviceScope     String? // disciplines / services requested
+  sector           String? // industry sector
+  source           String? // referral, tender platform, existing client
+  ownerId          String? // Employee (sales responsible)
+  lostReason       String?
+  wonDate          DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  company       Company               @relation(fields: [companyId], references: [id])
+  partner       BusinessPartner       @relation(fields: [partnerId], references: [id])
+  owner         Employee?             @relation(fields: [ownerId], references: [id])
+  proposals     Proposal[]
+  crmActivities CrmActivity[]
+  goNoGo        GoNoGoEvaluation?
+  competitors   OpportunityCompetitor[]
+
+  @@unique([companyId, opportunityNumber])
+  @@index([companyId, stage])
+  @@map("opportunities")
+}
+
+model GoNoGoEvaluation {
+  id             String   @id @default(cuid())
+  opportunityId  String   @unique
+  decision       String? // GO | NO_GO | CONDITIONAL
+  decisionDate   DateTime?
+  decisionById   String?
+  clientRelation Int? // scoring 1-5
+  strategicFit   Int?
+  capacity       Int?
+  winProbability Int?
+  riskLevel      Int?
+  totalScore     Int?
+  comments       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+
+  @@map("go_no_go_evaluations")
+}
+
+model Competitor {
+  id       String  @id @default(cuid())
+  name     String
+  website  String?
+  strengths String?
+  weaknesses String?
+
+  opportunities OpportunityCompetitor[]
+
+  @@map("competitors")
+}
+
+model OpportunityCompetitor {
+  opportunityId String
+  competitorId  String
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  competitor  Competitor  @relation(fields: [competitorId], references: [id])
+
+  @@id([opportunityId, competitorId])
+  @@map("opportunity_competitors")
+}
+
+enum ProposalStatus {
+  DRAFT
+  IN_PREPARATION
+  IN_REVIEW
+  APPROVED
+  SUBMITTED
+  SHORTLISTED
+  WON
+  LOST
+  WITHDRAWN
+}
+
+model Proposal {
+  id             String         @id @default(cuid())
+  companyId      String
+  opportunityId  String
+  proposalNumber String
+  title          String
+  status         ProposalStatus @default(DRAFT)
+  submissionDate DateTime?
+  validUntil     DateTime?
+  totalFee       Decimal?       @db.Decimal(18, 2)
+  estimatedCost  Decimal?       @db.Decimal(18, 2)
+  estimatedHours Decimal?       @db.Decimal(10, 2)
+  marginPercent  Decimal?       @db.Decimal(5, 2)
+  currencyCode   String         @default("EUR")
+  managerId      String? // Employee — proposal manager
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  company     Company           @relation(fields: [companyId], references: [id])
+  opportunity Opportunity       @relation(fields: [opportunityId], references: [id])
+  manager     Employee?         @relation(fields: [managerId], references: [id])
+  versions    ProposalVersion[]
+  feeLines    FeeCalculationLine[]
+
+  @@unique([companyId, proposalNumber])
+  @@map("proposals")
+}
+
+model ProposalVersion {
+  id         String   @id @default(cuid())
+  proposalId String
+  version    Int
+  fileId     String? // Document
+  note       String?
+  createdAt  DateTime @default(now())
+  createdById String?
+
+  proposal Proposal @relation(fields: [proposalId], references: [id])
+
+  @@unique([proposalId, version])
+  @@map("proposal_versions")
+}
+
+model FeeCalculationLine {
+  id          String  @id @default(cuid())
+  proposalId  String
+  discipline  String // e.g. "Structural Engineering"
+  role        String // e.g. "Senior Engineer"
+  hours       Decimal @db.Decimal(10, 2)
+  hourlyRate  Decimal @db.Decimal(10, 2)
+  costRate    Decimal? @db.Decimal(10, 2)
+  sortOrder   Int     @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@map("fee_calculation_lines")
+}
+
+model ReferenceProject {
+  id           String   @id @default(cuid())
+  title        String
+  clientName   String
+  sector       String?
+  country      String?
+  servicesProvided String?
+  projectValue Decimal? @db.Decimal(18, 2)
+  startDate    DateTime?
+  endDate      DateTime?
+  description  String?
+  isPublic     Boolean  @default(false) // usable in proposals
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("reference_projects")
+}
+
+// =====================================================================
+// 6. CONTRACT MANAGEMENT
+// =====================================================================
+
+enum ContractStatus {
+  DRAFT
+  IN_REVIEW
+  IN_APPROVAL
+  ACTIVE
+  EXPIRED
+  TERMINATED
+  RENEWED
+}
+
+model Contract {
+  id             String         @id @default(cuid())
+  companyId      String
+  partnerId      String?
+  contractTypeId String
+  contractNumber String
+  title          String
+  description    String?
+  status         ContractStatus @default(DRAFT)
+  value          Decimal?       @db.Decimal(18, 2)
+  currencyCode   String         @default("EUR")
+  startDate      DateTime?
+  endDate        DateTime?
+  noticePeriodDays Int?
+  autoRenewal    Boolean        @default(false)
+  renewalMonths  Int?
+  signedDate     DateTime?
+  riskLevel      String? // LOW | MEDIUM | HIGH
+  riskNotes      String?
+  ownerId        String? // Employee — contract owner
+  parentId       String? // framework agreement parent
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  company      Company            @relation(fields: [companyId], references: [id])
+  partner      BusinessPartner?   @relation(fields: [partnerId], references: [id])
+  contractType ContractTypeRef    @relation(fields: [contractTypeId], references: [id])
+  owner        Employee?          @relation(fields: [ownerId], references: [id])
+  parent       Contract?          @relation("FrameworkCalls", fields: [parentId], references: [id])
+  callOffs     Contract[]         @relation("FrameworkCalls")
+  versions     ContractVersion[]
+  obligations  ContractObligation[]
+  milestones   PaymentMilestone[]
+  variations   VariationOrder[]
+  claims       Claim[]
+  guarantees   BankGuarantee[]
+
+  @@unique([companyId, contractNumber])
+  @@index([companyId, status])
+  @@index([endDate])
+  @@map("contracts")
+}
+
+model ContractVersion {
+  id          String   @id @default(cuid())
+  contractId  String
+  version     Int
+  fileId      String? // Document
+  changeNote  String?
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@unique([contractId, version])
+  @@map("contract_versions")
+}
+
+model ContractObligation {
+  id          String    @id @default(cuid())
+  contractId  String
+  title       String
+  description String?
+  dueDate     DateTime?
+  recurrence  String? // NONE | MONTHLY | QUARTERLY | YEARLY
+  responsibleId String? // Employee
+  isFulfilled Boolean   @default(false)
+  fulfilledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@index([dueDate, isFulfilled])
+  @@map("contract_obligations")
+}
+
+model PaymentMilestone {
+  id         String    @id @default(cuid())
+  contractId String
+  title      String
+  amount     Decimal   @db.Decimal(18, 2)
+  percentage Decimal?  @db.Decimal(5, 2)
+  dueDate    DateTime?
+  isInvoiced Boolean   @default(false)
+  invoiceId  String?
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@map("payment_milestones")
+}
+
+model VariationOrder {
+  id         String   @id @default(cuid())
+  contractId String
+  voNumber   String
+  title      String
+  description String?
+  amount     Decimal  @db.Decimal(18, 2)
+  status     String   @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | REJECTED
+  submittedAt DateTime?
+  decidedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@unique([contractId, voNumber])
+  @@map("variation_orders")
+}
+
+model Claim {
+  id          String   @id @default(cuid())
+  contractId  String
+  claimNumber String
+  title       String
+  description String?
+  direction   String // OUTGOING | INCOMING
+  amount      Decimal? @db.Decimal(18, 2)
+  status      String   @default("OPEN") // OPEN | NOTIFIED | NEGOTIATION | SETTLED | REJECTED | LITIGATION
+  notifiedAt  DateTime?
+  settledAt   DateTime?
+  settledAmount Decimal? @db.Decimal(18, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@unique([contractId, claimNumber])
+  @@map("claims")
+}
+
+model BankGuarantee {
+  id          String    @id @default(cuid())
+  contractId  String?
+  guaranteeNumber String
+  type        String // ADVANCE_PAYMENT | PERFORMANCE | WARRANTY | BID_BOND
+  issuingBank String
+  amount      Decimal   @db.Decimal(18, 2)
+  currencyCode String   @default("EUR")
+  issuedDate  DateTime?
+  expiryDate  DateTime?
+  status      String    @default("ACTIVE") // ACTIVE | RETURNED | DRAWN | EXPIRED
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  contract Contract? @relation(fields: [contractId], references: [id])
+
+  @@index([expiryDate])
+  @@map("bank_guarantees")
+}
+
+model InsurancePolicy {
+  id            String    @id @default(cuid())
+  policyNumber  String
+  type          String // PROFESSIONAL_LIABILITY | PUBLIC_LIABILITY | D_AND_O | CYBER | PROPERTY | VEHICLE
+  insurer       String
+  coverageAmount Decimal? @db.Decimal(18, 2)
+  annualPremium Decimal?  @db.Decimal(18, 2)
+  startDate     DateTime?
+  endDate       DateTime?
+  autoRenewal   Boolean   @default(true)
+  notes         String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([endDate])
+  @@map("insurance_policies")
+}
+
+// =====================================================================
+// 7. FINANCE
+// =====================================================================
+
+enum InvoiceDirection {
+  OUTGOING // AR — Ausgangsrechnung
+  INCOMING // AP — Eingangsrechnung
+}
+
+enum InvoiceStatus {
+  DRAFT
+  IN_APPROVAL
+  APPROVED
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  DISPUTED
+  CANCELLED
+}
+
+model Invoice {
+  id             String           @id @default(cuid())
+  companyId      String
+  partnerId      String
+  direction      InvoiceDirection
+  status         InvoiceStatus    @default(DRAFT)
+  invoiceNumber  String // own number (outgoing) or internal register number (incoming)
+  externalNumber String? // supplier's invoice number
+  invoiceDate    DateTime
+  serviceDate    DateTime? // Leistungsdatum (German VAT requirement)
+  dueDate        DateTime
+  currencyCode   String           @default("EUR")
+  netAmount      Decimal          @db.Decimal(18, 2)
+  taxAmount      Decimal          @db.Decimal(18, 2)
+  grossAmount    Decimal          @db.Decimal(18, 2)
+  paidAmount     Decimal          @default(0) @db.Decimal(18, 2)
+  reference      String? // client PO / contract reference
+  contractId     String?
+  notes          String?
+  datevExportedAt DateTime?
+  xrechnungId    String? // Leitweg-ID for XRechnung e-invoicing
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  company  Company         @relation(fields: [companyId], references: [id])
+  partner  BusinessPartner @relation(fields: [partnerId], references: [id])
+  lines    InvoiceLine[]
+  payments PaymentAllocation[]
+
+  @@unique([companyId, direction, invoiceNumber])
+  @@index([companyId, status, dueDate])
+  @@map("invoices")
+}
+
+model InvoiceLine {
+  id           String  @id @default(cuid())
+  invoiceId    String
+  position     Int
+  description  String
+  quantity     Decimal @default(1) @db.Decimal(12, 3)
+  unit         String  @default("pcs") // h, day, pcs, LS (lump sum)
+  unitPrice    Decimal @db.Decimal(18, 4)
+  netAmount    Decimal @db.Decimal(18, 2)
+  taxCodeId    String
+  costCenterId String?
+
+  invoice    Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  taxCode    TaxCode     @relation(fields: [taxCodeId], references: [id])
+  costCenter CostCenter? @relation(fields: [costCenterId], references: [id])
+
+  @@unique([invoiceId, position])
+  @@map("invoice_lines")
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  bankAccountId String
+  paymentDate   DateTime
+  amount        Decimal  @db.Decimal(18, 2)
+  currencyCode  String   @default("EUR")
+  direction     String // IN | OUT
+  reference     String?
+  counterparty  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bankAccount BankAccount         @relation(fields: [bankAccountId], references: [id])
+  allocations PaymentAllocation[]
+
+  @@map("payments")
+}
+
+model PaymentAllocation {
+  id        String  @id @default(cuid())
+  paymentId String
+  invoiceId String
+  amount    Decimal @db.Decimal(18, 2)
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("payment_allocations")
+}
+
+model Budget {
+  id        String @id @default(cuid())
+  companyId String
+  year      Int
+  name      String
+  status    String @default("DRAFT") // DRAFT | APPROVED | CLOSED
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company Company      @relation(fields: [companyId], references: [id])
+  lines   BudgetLine[]
+
+  @@unique([companyId, year, name])
+  @@map("budgets")
+}
+
+model BudgetLine {
+  id           String  @id @default(cuid())
+  budgetId     String
+  costCenterId String
+  category     String // REVENUE | PERSONNEL | RENT | IT | TRAVEL | MARKETING | OTHER
+  month        Int // 1-12
+  plannedAmount Decimal @db.Decimal(18, 2)
+  forecastAmount Decimal? @db.Decimal(18, 2)
+
+  budget     Budget     @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  costCenter CostCenter @relation(fields: [costCenterId], references: [id])
+
+  @@unique([budgetId, costCenterId, category, month])
+  @@map("budget_lines")
+}
+
+// =====================================================================
+// 8. HUMAN RESOURCES
+// =====================================================================
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  NOTICE_PERIOD
+  TERMINATED
+  RETIRED
+}
+
+model Employee {
+  id             String           @id @default(cuid())
+  companyId      String
+  officeId       String?
+  departmentId   String?
+  positionId     String?
+  managerId      String?
+  userId         String?          @unique
+  employeeNumber String
+  salutation     String?
+  title          String? // Dr., Dipl.-Ing., M.Sc.
+  firstName      String
+  lastName       String
+  birthDate      DateTime?
+  nationality    String?
+  privateEmail   String?
+  workEmail      String?
+  phone          String?
+  mobile         String?
+  street         String?
+  postalCode     String?
+  city           String?
+  countryCode    String?
+  status         EmploymentStatus @default(ACTIVE)
+  hireDate       DateTime?
+  exitDate       DateTime?
+  weeklyHours    Decimal?         @db.Decimal(4, 1)
+  vacationDays   Decimal?         @db.Decimal(4, 1)
+  discipline     String? // engineering discipline
+  photoUrl       String?
+  emergencyContact String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  company            Company             @relation(fields: [companyId], references: [id])
+  office             Office?             @relation(fields: [officeId], references: [id])
+  department         Department?         @relation(fields: [departmentId], references: [id])
+  position           Position?           @relation(fields: [positionId], references: [id])
+  manager            Employee?           @relation("ManagerHierarchy", fields: [managerId], references: [id])
+  directReports      Employee[]          @relation("ManagerHierarchy")
+  user               User?               @relation(fields: [userId], references: [id])
+  managedDepartments Department[]        @relation("DepartmentManager")
+  ledBusinessUnits   BusinessUnit[]
+  employmentContracts EmploymentContract[]
+  skills             EmployeeSkill[]
+  certificates       EmployeeCertificate[]
+  trainings          TrainingParticipation[]
+  leaveRequests      LeaveRequest[]
+  leaveBalances      LeaveBalance[]
+  businessTrips      BusinessTrip[]
+  performanceReviews PerformanceReview[] @relation("ReviewedEmployee")
+  givenReviews       PerformanceReview[] @relation("Reviewer")
+  assetAssignments   AssetAssignment[]
+  crmActivities      CrmActivity[]
+  managedPartners    BusinessPartner[]
+  ownedOpportunities Opportunity[]
+  managedProposals   Proposal[]
+  ownedContracts     Contract[]
+  cvProfile          CvProfile?
+
+  @@unique([companyId, employeeNumber])
+  @@index([companyId, status])
+  @@index([lastName, firstName])
+  @@map("employees")
+}
+
+model Position {
+  id           String  @id @default(cuid())
+  departmentId String?
+  code         String  @unique
+  name         String
+  nameDe       String?
+  level        String? // JUNIOR | PROFESSIONAL | SENIOR | LEAD | PRINCIPAL | DIRECTOR
+  isActive     Boolean @default(true)
+
+  department Department? @relation(fields: [departmentId], references: [id])
+  employees  Employee[]
+
+  @@map("positions")
+}
+
+model EmploymentContract {
+  id           String    @id @default(cuid())
+  employeeId   String
+  contractType String // PERMANENT | FIXED_TERM | PART_TIME | WORKING_STUDENT | FREELANCE | INTERNSHIP
+  startDate    DateTime
+  endDate      DateTime?
+  weeklyHours  Decimal   @db.Decimal(4, 1)
+  annualSalary Decimal?  @db.Decimal(18, 2)
+  vacationDays Decimal   @db.Decimal(4, 1)
+  probationEndDate DateTime?
+  noticePeriodWeeks Int?
+  fileId       String? // Document
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("employment_contracts")
+}
+
+model Skill {
+  id       String @id @default(cuid())
+  category String // DISCIPLINE | SOFTWARE | LANGUAGE | METHOD | SOFT_SKILL
+  name     String
+  nameDe   String?
+
+  employeeSkills EmployeeSkill[]
+
+  @@unique([category, name])
+  @@map("skills")
+}
+
+model EmployeeSkill {
+  id         String @id @default(cuid())
+  employeeId String
+  skillId    String
+  level      Int // 1-5 competence level
+  yearsOfExperience Decimal? @db.Decimal(4, 1)
+  isVerified Boolean @default(false)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  skill    Skill    @relation(fields: [skillId], references: [id])
+
+  @@unique([employeeId, skillId])
+  @@map("employee_skills")
+}
+
+model EmployeeCertificate {
+  id          String    @id @default(cuid())
+  employeeId  String
+  name        String
+  issuer      String?
+  issuedDate  DateTime?
+  expiryDate  DateTime?
+  fileId      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([expiryDate])
+  @@map("employee_certificates")
+}
+
+model Training {
+  id          String    @id @default(cuid())
+  title       String
+  provider    String?
+  category    String? // TECHNICAL | SOFTWARE | SAFETY | LEADERSHIP | LANGUAGE | COMPLIANCE
+  startDate   DateTime?
+  endDate     DateTime?
+  costPerHead Decimal?  @db.Decimal(18, 2)
+  maxSeats    Int?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  participants TrainingParticipation[]
+
+  @@map("trainings")
+}
+
+model TrainingParticipation {
+  id         String  @id @default(cuid())
+  trainingId String
+  employeeId String
+  status     String  @default("REGISTERED") // REGISTERED | ATTENDED | COMPLETED | CANCELLED
+  result     String?
+
+  training Training @relation(fields: [trainingId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([trainingId, employeeId])
+  @@map("training_participations")
+}
+
+enum LeaveType {
+  VACATION
+  SICK
+  SPECIAL
+  UNPAID
+  PARENTAL
+  OVERTIME_COMPENSATION
+  HOME_OFFICE
+}
+
+enum LeaveStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model LeaveRequest {
+  id         String      @id @default(cuid())
+  employeeId String
+  type       LeaveType
+  status     LeaveStatus @default(REQUESTED)
+  startDate  DateTime
+  endDate    DateTime
+  days       Decimal     @db.Decimal(4, 1)
+  note       String?
+  approvedById String?
+  decidedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, startDate])
+  @@map("leave_requests")
+}
+
+model LeaveBalance {
+  id           String  @id @default(cuid())
+  employeeId   String
+  year         Int
+  entitlement  Decimal @db.Decimal(4, 1)
+  carryOver    Decimal @default(0) @db.Decimal(4, 1)
+  taken        Decimal @default(0) @db.Decimal(4, 1)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, year])
+  @@map("leave_balances")
+}
+
+model BusinessTrip {
+  id          String    @id @default(cuid())
+  employeeId  String
+  destination String
+  purpose     String
+  startDate   DateTime
+  endDate     DateTime
+  status      String    @default("REQUESTED") // REQUESTED | APPROVED | REJECTED | COMPLETED | SETTLED
+  estimatedCost Decimal? @db.Decimal(18, 2)
+  actualCost  Decimal?  @db.Decimal(18, 2)
+  approvedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("business_trips")
+}
+
+model PerformanceReview {
+  id           String    @id @default(cuid())
+  employeeId   String
+  reviewerId   String
+  period       String // "2026-H1"
+  reviewDate   DateTime?
+  overallRating Int? // 1-5
+  strengths    String?
+  improvements String?
+  goals        String?
+  status       String    @default("PLANNED") // PLANNED | IN_PROGRESS | COMPLETED | ACKNOWLEDGED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee Employee @relation("ReviewedEmployee", fields: [employeeId], references: [id])
+  reviewer Employee @relation("Reviewer", fields: [reviewerId], references: [id])
+
+  @@map("performance_reviews")
+}
+
+model CvProfile {
+  id          String  @id @default(cuid())
+  employeeId  String  @unique
+  summaryDe   String?
+  summaryEn   String?
+  keyProjects String? // JSON array of project references
+  educationJson String? // JSON
+  updatedAt   DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("cv_profiles")
+}
+
+// --- Recruitment ---
+
+model JobOpening {
+  id           String    @id @default(cuid())
+  companyId    String
+  title        String
+  departmentName String?
+  officeName   String?
+  status       String    @default("OPEN") // DRAFT | OPEN | ON_HOLD | FILLED | CANCELLED
+  publishedAt  DateTime?
+  targetStartDate DateTime?
+  description  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  applicants Applicant[]
+
+  @@map("job_openings")
+}
+
+model Applicant {
+  id           String    @id @default(cuid())
+  jobOpeningId String
+  firstName    String
+  lastName     String
+  email        String
+  phone        String?
+  source       String? // LinkedIn, StepStone, referral
+  stage        String    @default("NEW") // NEW | SCREENING | INTERVIEW | OFFER | HIRED | REJECTED | WITHDRAWN
+  expectedSalary Decimal? @db.Decimal(18, 2)
+  availableFrom DateTime?
+  gdprConsentDate DateTime?
+  gdprDeleteBy DateTime? // GDPR: delete 6 months after rejection
+  notes        String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  jobOpening JobOpening  @relation(fields: [jobOpeningId], references: [id])
+  interviews Interview[]
+
+  @@index([gdprDeleteBy])
+  @@map("applicants")
+}
+
+model Interview {
+  id           String    @id @default(cuid())
+  applicantId  String
+  scheduledAt  DateTime
+  type         String // PHONE | VIDEO | ONSITE | TECHNICAL
+  interviewerIds String[]
+  rating       Int?
+  feedback     String?
+  result       String? // PROCEED | REJECT | HOLD
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applicant Applicant @relation(fields: [applicantId], references: [id])
+
+  @@map("interviews")
+}
+
+// =====================================================================
+// 9. LEGAL & COMPLIANCE
+// =====================================================================
+
+model LegalCase {
+  id          String    @id @default(cuid())
+  caseNumber  String    @unique
+  title       String
+  type        String // LITIGATION | ARBITRATION | ADMINISTRATIVE | EMPLOYMENT | IP
+  status      String    @default("OPEN") // OPEN | ACTIVE | SETTLED | CLOSED | WON | LOST
+  partnerId   String?
+  externalCounsel String?
+  amountInDispute Decimal? @db.Decimal(18, 2)
+  provisionAmount Decimal? @db.Decimal(18, 2)
+  openedDate  DateTime?
+  closedDate  DateTime?
+  description String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  partner BusinessPartner? @relation(fields: [partnerId], references: [id])
+
+  @@map("legal_cases")
+}
+
+model ComplianceItem {
+  id           String    @id @default(cuid())
+  category     String // GDPR | ISO_9001 | ISO_14001 | ISO_45001 | LICENSE | REGISTER | TAX | OTHER
+  title        String
+  description  String?
+  responsibleId String?
+  dueDate      DateTime?
+  recurrence   String? // YEARLY | QUARTERLY | MONTHLY
+  status       String    @default("OPEN") // OPEN | IN_PROGRESS | COMPLIANT | NON_COMPLIANT | NOT_APPLICABLE
+  lastReviewDate DateTime?
+  evidence     String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([dueDate, status])
+  @@map("compliance_items")
+}
+
+model DataProcessingActivity {
+  id             String  @id @default(cuid())
+  name           String // Verarbeitungsverzeichnis Art. 30 DSGVO
+  purpose        String
+  legalBasis     String // Art. 6(1)(a)-(f)
+  dataCategories String
+  dataSubjects   String
+  recipients     String?
+  retentionPeriod String?
+  technicalMeasures String?
+  responsibleId  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("data_processing_activities")
+}
+
+model WhistleblowerReport {
+  id          String   @id @default(cuid())
+  referenceCode String @unique // anonymous access code
+  category    String
+  description String
+  status      String   @default("SUBMITTED") // SUBMITTED | UNDER_REVIEW | INVESTIGATION | CLOSED
+  isAnonymous Boolean  @default(true)
+  submittedAt DateTime @default(now())
+  closedAt    DateTime?
+  resolution  String?
+
+  @@map("whistleblower_reports")
+}
+
+model ProfessionalLicense {
+  id         String    @id @default(cuid())
+  holderType String // COMPANY | EMPLOYEE
+  holderId   String
+  name       String // e.g. "Beratender Ingenieur (Ingenieurkammer Bayern)"
+  authority  String?
+  licenseNumber String?
+  issuedDate DateTime?
+  expiryDate DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([expiryDate])
+  @@map("professional_licenses")
+}
+
+// =====================================================================
+// 10. CORPORATE PROCUREMENT
+// =====================================================================
+
+enum PurchaseStatus {
+  DRAFT
+  SUBMITTED
+  IN_APPROVAL
+  APPROVED
+  REJECTED
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  INVOICED
+  CLOSED
+  CANCELLED
+}
+
+model PurchaseRequest {
+  id            String         @id @default(cuid())
+  companyId     String
+  requestNumber String
+  requesterId   String // Employee
+  category      String // IT | SOFTWARE | OFFICE | VEHICLE | FURNITURE | SERVICE | OTHER
+  status        PurchaseStatus @default(DRAFT)
+  neededBy      DateTime?
+  justification String?
+  totalEstimate Decimal?       @db.Decimal(18, 2)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  company Company               @relation(fields: [companyId], references: [id])
+  items   PurchaseRequestItem[]
+  orders  PurchaseOrder[]
+
+  @@unique([companyId, requestNumber])
+  @@map("purchase_requests")
+}
+
+model PurchaseRequestItem {
+  id          String  @id @default(cuid())
+  requestId   String
+  description String
+  quantity    Decimal @db.Decimal(12, 3)
+  unit        String  @default("pcs")
+  estimatedPrice Decimal? @db.Decimal(18, 2)
+
+  request PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@map("purchase_request_items")
+}
+
+model PurchaseOrder {
+  id          String         @id @default(cuid())
+  companyId   String
+  requestId   String?
+  supplierId  String
+  orderNumber String
+  status      PurchaseStatus @default(ORDERED)
+  orderDate   DateTime       @default(now())
+  expectedDelivery DateTime?
+  currencyCode String        @default("EUR")
+  netTotal    Decimal        @db.Decimal(18, 2)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  company  Company             @relation(fields: [companyId], references: [id])
+  request  PurchaseRequest?    @relation(fields: [requestId], references: [id])
+  supplier BusinessPartner     @relation(fields: [supplierId], references: [id])
+  items    PurchaseOrderItem[]
+  receipts GoodsReceipt[]
+
+  @@unique([companyId, orderNumber])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id          String  @id @default(cuid())
+  orderId     String
+  description String
+  quantity    Decimal @db.Decimal(12, 3)
+  unit        String  @default("pcs")
+  unitPrice   Decimal @db.Decimal(18, 4)
+  receivedQty Decimal @default(0) @db.Decimal(12, 3)
+
+  order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("purchase_order_items")
+}
+
+model GoodsReceipt {
+  id         String   @id @default(cuid())
+  orderId    String
+  receivedAt DateTime @default(now())
+  receivedById String?
+  note       String?
+
+  order PurchaseOrder @relation(fields: [orderId], references: [id])
+
+  @@map("goods_receipts")
+}
+
+model SupplierEvaluation {
+  id         String   @id @default(cuid())
+  supplierId String
+  period     String // "2026-Q2"
+  quality    Int // 1-5
+  delivery   Int
+  price      Int
+  communication Int
+  overallScore Decimal @db.Decimal(3, 2)
+  comments   String?
+  evaluatedById String?
+
+  createdAt DateTime @default(now())
+
+  supplier BusinessPartner @relation(fields: [supplierId], references: [id])
+
+  @@unique([supplierId, period])
+  @@map("supplier_evaluations")
+}
+
+// =====================================================================
+// 11. ASSET MANAGEMENT
+// =====================================================================
+
+enum AssetStatus {
+  IN_STOCK
+  ASSIGNED
+  IN_REPAIR
+  RETIRED
+  LOST
+  SOLD
+}
+
+model Asset {
+  id             String      @id @default(cuid())
+  companyId      String
+  categoryId     String
+  assetNumber    String // also encoded in QR code
+  name           String
+  serialNumber   String?
+  manufacturer   String?
+  model          String?
+  status         AssetStatus @default(IN_STOCK)
+  purchaseDate   DateTime?
+  purchasePrice  Decimal?    @db.Decimal(18, 2)
+  warrantyUntil  DateTime?
+  leaseEndDate   DateTime?
+  licensePlate   String? // vehicles
+  nextServiceDate DateTime? // maintenance / calibration / TÜV
+  location       String?
+  notes          String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  company     Company             @relation(fields: [companyId], references: [id])
+  category    AssetCategory       @relation(fields: [categoryId], references: [id])
+  assignments AssetAssignment[]
+  maintenance MaintenanceRecord[]
+
+  @@unique([companyId, assetNumber])
+  @@index([companyId, status])
+  @@index([nextServiceDate])
+  @@map("assets")
+}
+
+model AssetAssignment {
+  id         String    @id @default(cuid())
+  assetId    String
+  employeeId String
+  assignedAt DateTime  @default(now())
+  returnedAt DateTime?
+  note       String?
+  handoverSignedAt DateTime?
+
+  asset    Asset    @relation(fields: [assetId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([assetId])
+  @@map("asset_assignments")
+}
+
+model MaintenanceRecord {
+  id          String   @id @default(cuid())
+  assetId     String
+  type        String // MAINTENANCE | REPAIR | CALIBRATION | INSPECTION | TUV
+  performedAt DateTime
+  performedBy String?
+  cost        Decimal? @db.Decimal(18, 2)
+  result      String?
+  nextDueDate DateTime?
+
+  asset Asset @relation(fields: [assetId], references: [id])
+
+  @@map("maintenance_records")
+}
+
+model SoftwareLicense {
+  id          String    @id @default(cuid())
+  name        String // "AutoCAD 2026", "MS 365 E3"
+  vendor      String?
+  licenseType String // PERPETUAL | SUBSCRIPTION | FLOATING | NAMED_USER
+  seats       Int       @default(1)
+  usedSeats   Int       @default(0)
+  costPerYear Decimal?  @db.Decimal(18, 2)
+  renewalDate DateTime?
+  licenseKey  String?
+  assignedUserIds String[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([renewalDate])
+  @@map("software_licenses")
+}
+
+// =====================================================================
+// 12. KNOWLEDGE MANAGEMENT
+// =====================================================================
+
+model KnowledgeCategory {
+  id       String  @id @default(cuid())
+  parentId String?
+  name     String
+  nameDe   String?
+  sortOrder Int    @default(0)
+
+  parent   KnowledgeCategory?  @relation("KnowledgeCategoryTree", fields: [parentId], references: [id])
+  children KnowledgeCategory[] @relation("KnowledgeCategoryTree")
+  articles KnowledgeArticle[]
+
+  @@map("knowledge_categories")
+}
+
+model KnowledgeArticle {
+  id         String    @id @default(cuid())
+  categoryId String?
+  type       String    @default("ARTICLE") // ARTICLE | STANDARD | PROCEDURE | TEMPLATE | LESSON_LEARNED | FAQ
+  title      String
+  content    String // Markdown
+  language   String    @default("de")
+  status     String    @default("DRAFT") // DRAFT | IN_REVIEW | PUBLISHED | ARCHIVED
+  publishedAt DateTime?
+  authorId   String?
+  reviewerId String?
+  viewCount  Int       @default(0)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  category KnowledgeCategory? @relation(fields: [categoryId], references: [id])
+  versions ArticleVersion[]
+
+  @@index([status])
+  @@map("knowledge_articles")
+}
+
+model ArticleVersion {
+  id        String   @id @default(cuid())
+  articleId String
+  version   Int
+  content   String
+  createdAt DateTime @default(now())
+  createdById String?
+
+  article KnowledgeArticle @relation(fields: [articleId], references: [id])
+
+  @@unique([articleId, version])
+  @@map("article_versions")
+}
+
+// =====================================================================
+// 13. DOCUMENT MANAGEMENT
+// =====================================================================
+
+model Folder {
+  id        String  @id @default(cuid())
+  parentId  String?
+  name      String
+  path      String // materialized path "/Contracts/2026"
+  companyId String?
+  module    String? // owning module, null = general DMS
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id])
+  children  Folder[]   @relation("FolderTree")
+  documents Document[]
+
+  @@index([path])
+  @@map("folders")
+}
+
+model Document {
+  id             String    @id @default(cuid())
+  folderId       String?
+  documentTypeId String?
+  name           String
+  description    String?
+  currentVersion Int       @default(1)
+  checkedOutById String? // null = not checked out
+  checkedOutAt   DateTime?
+  retentionUntil DateTime?
+  ocrText        String? // extracted full text for search
+  entityType     String? // linked business entity ("contract", "invoice", ...)
+  entityId       String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  folder       Folder?           @relation(fields: [folderId], references: [id])
+  documentType DocumentTypeRef?  @relation(fields: [documentTypeId], references: [id])
+  versions     DocumentVersion[]
+
+  @@index([entityType, entityId])
+  @@index([folderId])
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String
+  version    Int
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  storageKey String // S3/MinIO object key
+  checksum   String? // SHA-256
+  note       String?
+  createdAt  DateTime @default(now())
+  createdById String?
+
+  document Document @relation(fields: [documentId], references: [id])
+
+  @@unique([documentId, version])
+  @@map("document_versions")
+}
+
+// =====================================================================
+// 14. WORKFLOW ENGINE
+// =====================================================================
+
+model WorkflowDefinition {
+  id          String  @id @default(cuid())
+  code        String  @unique // "invoice-approval", "leave-approval"
+  name        String
+  description String?
+  module      String
+  entityType  String // entity the workflow attaches to
+  definition  Json // steps, conditions, escalations (designer output)
+  version     Int     @default(1)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  instances WorkflowInstance[]
+
+  @@map("workflow_definitions")
+}
+
+enum WorkflowStatus {
+  RUNNING
+  COMPLETED
+  REJECTED
+  CANCELLED
+  FAILED
+}
+
+model WorkflowInstance {
+  id           String         @id @default(cuid())
+  definitionId String
+  entityType   String
+  entityId     String
+  status       WorkflowStatus @default(RUNNING)
+  currentStep  String?
+  context      Json? // runtime variables
+  startedById  String?
+  startedAt    DateTime       @default(now())
+  completedAt  DateTime?
+
+  definition WorkflowDefinition @relation(fields: [definitionId], references: [id])
+  tasks      ApprovalTask[]
+
+  @@index([entityType, entityId])
+  @@index([status])
+  @@map("workflow_instances")
+}
+
+enum ApprovalTaskStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DELEGATED
+  ESCALATED
+  CANCELLED
+}
+
+model ApprovalTask {
+  id           String             @id @default(cuid())
+  instanceId   String
+  stepCode     String
+  title        String
+  assigneeId   String // User
+  status       ApprovalTaskStatus @default(PENDING)
+  dueAt        DateTime?
+  escalateToId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id])
+  actions  ApprovalAction[]
+
+  @@index([assigneeId, status])
+  @@map("approval_tasks")
+}
+
+model ApprovalAction {
+  id       String   @id @default(cuid())
+  taskId   String
+  userId   String
+  action   String // APPROVE | REJECT | DELEGATE | COMMENT
+  comment  String?
+  actedAt  DateTime @default(now())
+
+  task ApprovalTask @relation(fields: [taskId], references: [id])
+  user User         @relation(fields: [userId], references: [id])
+
+  @@map("approval_actions")
+}
+
+// =====================================================================
+// 15. CORPORATE MANAGEMENT
+// =====================================================================
+
+model CompanyGoal {
+  id        String    @id @default(cuid())
+  companyId String
+  year      Int
+  title     String
+  description String?
+  category  String? // FINANCIAL | GROWTH | PEOPLE | QUALITY | DIGITALIZATION
+  targetValue Decimal? @db.Decimal(18, 2)
+  currentValue Decimal? @db.Decimal(18, 2)
+  unit      String?
+  ownerId   String?
+  status    String    @default("ON_TRACK") // ON_TRACK | AT_RISK | OFF_TRACK | ACHIEVED
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("company_goals")
+}
+
+model Announcement {
+  id        String    @id @default(cuid())
+  companyId String?
+  title     String
+  content   String
+  priority  String    @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
+  publishAt DateTime  @default(now())
+  expiresAt DateTime?
+  authorId  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@map("announcements")
+}
+
+model CompanyCalendarEvent {
+  id        String   @id @default(cuid())
+  companyId String?
+  title     String
+  type      String // HOLIDAY | COMPANY_EVENT | DEADLINE | TRAINING | OTHER
+  startDate DateTime
+  endDate   DateTime?
+  isAllDay  Boolean  @default(true)
+  location  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("company_calendar_events")
+}
+
+// =====================================================================
+// 16. BUSINESS INTELLIGENCE
+// =====================================================================
+
+model Dashboard {
+  id        String  @id @default(cuid())
+  name      String
+  ownerId   String? // null = shared/system dashboard
+  module    String?
+  layout    Json // widget grid layout
+  isDefault Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@map("dashboards")
+}
+
+model ReportDefinition {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  module      String
+  query       Json // report builder definition
+  outputFormats String[] // PDF | XLSX | CSV
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  schedules ScheduledReport[]
+
+  @@map("report_definitions")
+}
+
+model ScheduledReport {
+  id         String   @id @default(cuid())
+  reportId   String
+  cron       String // "0 6 1 * *"
+  recipients String[] // emails
+  format     String   @default("PDF")
+  isActive   Boolean  @default(true)
+  lastRunAt  DateTime?
+
+  report ReportDefinition @relation(fields: [reportId], references: [id])
+
+  @@map("scheduled_reports")
+}
+
+// =====================================================================
+// 17. CROSS-CUTTING — AUDIT, ACTIVITY, NOTIFICATIONS, TAGS, ETC.
+// =====================================================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  companyId  String?
+  entityType String
+  entityId   String
+  action     String // CREATE | UPDATE | DELETE | RESTORE | LOGIN | EXPORT | APPROVE ...
+  changes    Json? // { field: { old, new } }
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// Human-readable timeline entries shown on entity pages & activity feed
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  entityType String
+  entityId   String
+  verb       String // "created", "updated status", "commented", "uploaded"
+  summary    String
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+  @@map("activity_logs")
+}
+
+enum NotificationType {
+  APPROVAL_REQUEST
+  TASK_ASSIGNED
+  CONTRACT_EXPIRING
+  INVOICE_DUE
+  CERTIFICATE_EXPIRING
+  BIRTHDAY
+  NEW_EMPLOYEE
+  WORKFLOW
+  MENTION
+  SYSTEM
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  userId     String
+  type       NotificationType
+  title      String
+  body       String?
+  entityType String?
+  entityId   String?
+  link       String?
+  isRead     Boolean          @default(false)
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model Comment {
+  id         String    @id @default(cuid())
+  entityType String
+  entityId   String
+  authorId   String
+  content    String
+  parentId   String?
+  mentionIds String[] // mentioned user ids
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  author   User      @relation(fields: [authorId], references: [id])
+  parent   Comment?  @relation("CommentThread", fields: [parentId], references: [id])
+  replies  Comment[] @relation("CommentThread")
+
+  @@index([entityType, entityId])
+  @@map("comments")
+}
+
+model Attachment {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  storageKey String
+  uploadedById String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@map("attachments")
+}
+
+model Tag {
+  id    String @id @default(cuid())
+  name  String @unique
+  color String @default("#6B7280")
+
+  entityTags EntityTag[]
+
+  @@map("tags")
+}
+
+model EntityTag {
+  tagId      String
+  entityType String
+  entityId   String
+
+  tag Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([tagId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("entity_tags")
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  entityType  String? // optionally linked to a business entity
+  entityId    String?
+  assigneeId  String
+  creatorId   String
+  dueDate     DateTime?
+  priority    String    @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
+  status      String    @default("OPEN") // OPEN | IN_PROGRESS | DONE | CANCELLED
+  completedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  assignee User @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creator  User @relation("TaskCreator", fields: [creatorId], references: [id])
+
+  @@index([assigneeId, status])
+  @@index([entityType, entityId])
+  @@map("tasks")
+}
+
+model CustomFieldDefinition {
+  id         String  @id @default(cuid())
+  entityType String
+  key        String
+  label      String
+  labelDe    String?
+  fieldType  String // TEXT | NUMBER | DATE | BOOLEAN | SELECT | MULTI_SELECT | URL
+  options    String[] // for SELECT types
+  isRequired Boolean @default(false)
+  sortOrder  Int     @default(0)
+
+  values CustomFieldValue[]
+
+  @@unique([entityType, key])
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldValue {
+  id           String @id @default(cuid())
+  definitionId String
+  entityId     String
+  value        Json
+
+  definition CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@unique([definitionId, entityId])
+  @@map("custom_field_values")
+}
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  entityType String
+  entityId   String
+  label      String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, entityType, entityId])
+  @@map("favorites")
+}
+
+model SavedView {
+  id         String  @id @default(cuid())
+  userId     String
+  module     String
+  entityType String
+  name       String
+  viewType   String  @default("LIST") // LIST | KANBAN | CALENDAR | TIMELINE | MAP
+  config     Json // filters, sorting, grouping, visible columns
+  isShared   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("saved_views")
+}
+
+// Sequential number ranges per company & entity ("R-2026-00001")
+model NumberSequence {
+  id         String @id @default(cuid())
+  companyId  String
+  entityType String
+  prefix     String
+  year       Int?
+  lastNumber Int    @default(0)
+  padding    Int    @default(5)
+
+  @@unique([companyId, entityType, year])
+  @@map("number_sequences")
+}
+
+// Transactional outbox for reliable event publishing
+model OutboxEvent {
+  id          String    @id @default(cuid())
+  eventType   String // "invoice.approved", "contract.expiring"
+  payload     Json
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([publishedAt])
+  @@map("outbox_events")
+}
