@@ -12,3 +12,4 @@ coverage/
 apps/api/prisma/generated/
 apps/web/dist/
 uploads/
+backups/
