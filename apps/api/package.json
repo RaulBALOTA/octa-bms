@@ -16,7 +16,10 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:seed:demo": "tsx prisma/seed.ts --demo",
-    "data:reset:preview": "tsx prisma/clear-business-data.ts"
+    "data:reset:preview": "tsx prisma/clear-business-data.ts",
+    "test:auth": "vitest run --config vitest.integration.mts",
+    "auth:setup": "tsx --env-file=.env prisma/setup-secure-auth.ts",
+    "auth:admin": "tsx --env-file=.env prisma/auth-admin.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

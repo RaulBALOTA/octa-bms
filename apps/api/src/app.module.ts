@@ -5,6 +5,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
+import { LOG_REDACTION } from './core/security/log-redaction';
 
 import { PrismaModule } from './core/prisma/prisma.module';
 import { AuthModule } from './core/auth/auth.module';
@@ -47,18 +48,7 @@ import { CalendarModule } from './modules/business-calendar/calendar.module';
           process.env.NODE_ENV !== 'production'
             ? { target: 'pino-pretty', options: { singleLine: true } }
             : undefined,
-        // never log credentials, cookies, CSRF tokens or bodies (pino-http logs no bodies)
-        redact: {
-          paths: [
-            'req.headers.authorization',
-            'req.headers.cookie',
-            'req.headers["x-csrf-token"]',
-            'res.headers["set-cookie"]',
-            '*.password', '*.currentPassword', '*.newPassword', '*.code', '*.token',
-            '*.recoveryCodes', '*.manualKey', '*.qrSvg', '*.csrfToken', '*.secret',
-          ],
-          censor: '[redacted]',
-        },
+        redact: LOG_REDACTION,
       },
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),

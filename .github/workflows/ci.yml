@@ -60,6 +60,12 @@ jobs:
 
       - name: Seed smoke test
         run: pnpm --filter @octa-bms/api prisma:seed
+        env:
+          BOOTSTRAP_ADMIN_EMAIL: ci-admin@octa.invalid
+          BOOTSTRAP_ADMIN_PASSWORD: ci-only-bootstrap-password
+
+      - name: Authentication security suite (PostgreSQL)
+        run: pnpm --filter @octa-bms/api test:auth
 
       - name: Build
         run: pnpm build
