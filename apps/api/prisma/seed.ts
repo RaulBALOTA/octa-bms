@@ -23,6 +23,7 @@ const MODULES: Record<string, string[]> = {
   bi: ['dashboards', 'reports'],
   identity: ['users', 'roles', 'groups', 'apikeys'],
   admin: ['masterdata', 'audit', 'settings'],
+  engine: ['services', 'resources', 'portfolio', 'economics', 'scenarios', 'optimization', 'intelligence', 'settings'],
 };
 const ACTIONS = ['read', 'create', 'update', 'delete', 'approve', 'export'];
 
@@ -74,7 +75,7 @@ async function main() {
   // ------------------------------------------------------------------- roles
   const adminRole = await seedRole('SYSTEM_ADMIN', 'System Administrator', [/.*/]);
   const mdRole = await seedRole('MANAGING_DIRECTOR', 'Managing Director', [
-    /\.read$/, /\.approve$/, /\.export$/, /^corporate\./, /^calendar\./,
+    /\.read$/, /\.approve$/, /\.export$/, /^corporate\./, /^calendar\./, /^engine\./,
   ]);
   const salesRole = await seedRole('SALES_MANAGER', 'Sales Manager', [
     /^calendar\.items\.(read|create|update)$/,
@@ -83,11 +84,11 @@ async function main() {
   const financeRole = await seedRole('FINANCE_MANAGER', 'Finance Manager', [
     /^calendar\.items\.(read|create|update)$/,
     /^finance\./, /^crm\.partners\.read$/, /^contracts\.contracts\.read$/,
-    /^communication\./,
+    /^communication\./, /^engine\.(economics|scenarios|optimization|intelligence|portfolio)\./, /^engine\.\w+\.read$/,
   ]);
   const hrRole = await seedRole('HR_MANAGER', 'HR Manager', [
     /^calendar\.items\.(read|create|update)$/,
-    /^hr\./, /^communication\./,
+    /^hr\./, /^communication\./, /^engine\.resources\.(read|create|update)$/,
   ]);
   const employeeRole = await seedRole('EMPLOYEE', 'Employee (self-service)', [
     /^calendar\.items\.(read|create|update)$/,

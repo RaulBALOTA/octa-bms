@@ -20,6 +20,7 @@ export const PERMISSION_MODULES = {
   bi: ['dashboards', 'reports'],
   identity: ['users', 'roles', 'groups', 'apikeys'],
   admin: ['masterdata', 'audit', 'settings'],
+  engine: ['services', 'resources', 'portfolio', 'economics', 'scenarios', 'optimization', 'intelligence', 'settings'],
 } as const;
 
 export const PERMISSION_ACTIONS = [
