@@ -81,6 +81,13 @@ finance lists, dark mode, DE/EN).
 designer, DMS with OCR, knowledge base, Graph/Teams integration, DATEV export,
 BI dashboards, AI suite, Entra SSO. Nav items for these show a roadmap placeholder.
 
+## OCTA Business Engine
+
+Service portfolio economics, capacity, cash, scenarios, MILP optimization (HiGHS) and management intelligence under
+**Business Engine** (`/engine`). Documentation and current state: [docs/business-engine](docs/business-engine/STATE.md).
+Existing databases: apply `apps/api/prisma/sql/add_business_engine.sql` and `grant_business_engine_permissions.sql`
+(or `prisma/setup-business-engine.ts --apply` locally) — see [13_OPERATIONS](docs/business-engine/13_OPERATIONS.md).
+
 ## House rules
 
 - **Never** run destructive database commands (`prisma db push --force-reset`,

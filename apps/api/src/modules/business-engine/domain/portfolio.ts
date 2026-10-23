@@ -171,9 +171,11 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
   }
   const skillWeeks = new Map<string, { demand: number[]; covered: number[] }>();
   const skillKey = (id: string | null) => id ?? '*';
+  const pooledLines = allLines.filter((line) => line.pooled && line.weight > 0).map((line) => ({ line, q: qualified(line.d.skillId, line.minLevel) }));
+  const namedLines = allLines.filter((line) => line.resource && line.weight > 0);
   for (let w = 0; w < W; w++) {
-    for (const line of allLines) {
-      if (!line.resource || line.weight <= 0) continue;
+    for (const line of namedLines) {
+      if (!line.resource) continue;
       const h = (lineWeek.get(line.key) as Float64Array)[w] * line.weight;
       if (h <= EPS) continue;
       line.resource.weekPlanned[w] += h;
@@ -181,8 +183,7 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
       line.weekShares.set(w, { alloc: [[line.resource.index, 1]], shortage: 0 });
     }
     if (options.standardCosting) {
-      for (const line of allLines) {
-        if (!line.pooled || line.weight <= 0) continue;
+      for (const { line } of pooledLines) {
         const need = (lineWeek.get(line.key) as Float64Array)[w] * line.weight;
         if (need <= EPS) continue;
         const sk = skillWeeks.get(skillKey(line.d.skillId)) ?? { demand: new Array(W).fill(0), covered: new Array(W).fill(0) };
@@ -191,8 +192,7 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
       continue;
     }
     const free = resources.map((res) => Math.max(0, res.weekAvailable[w] - res.weekPlanned[w]));
-    const pool = allLines.filter((line) => line.pooled && line.weight > 0 && (lineWeek.get(line.key) as Float64Array)[w] > EPS)
-      .map((line) => ({ line, q: qualified(line.d.skillId, line.minLevel) }))
+    const pool = pooledLines.filter(({ line }) => (lineWeek.get(line.key) as Float64Array)[w] > EPS)
       .sort((x, y) => Number(x.line.a.commitment === 'PIPELINE') - Number(y.line.a.commitment === 'PIPELINE') || x.q.length - y.q.length || x.line.key.localeCompare(y.line.key));
     for (const { line, q } of pool) {
       const need = (lineWeek.get(line.key) as Float64Array)[w] * line.weight;
@@ -213,7 +213,12 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
   }
 
   /* ------------------------------------------------ economics per line and assignment */
-  const defaultInternal = (d: SnapshotDemand) => d.costRate ? dec(d.costRate) : dec(config.rates.defaultInternalCostRate).times(config.rates.seniorityCostFactors[d.seniority] ?? 1);
+  const rateMemo = new WeakMap<SnapshotDemand, Dec>();
+  const defaultInternal = (d: SnapshotDemand) => {
+    let rate = rateMemo.get(d);
+    if (!rate) { rate = d.costRate ? dec(d.costRate) : dec(config.rates.defaultInternalCostRate).times(config.rates.seniorityCostFactors[d.seniority] ?? 1); rateMemo.set(d, rate); }
+    return rate;
+  };
   const defaultExternal = (d: SnapshotDemand) => dec(d.externalRate ?? config.rates.defaultExternalRate);
   const standardRate = (line: LineState, day: number) => line.resource ? costAt(line.resource, day, defaultInternal(line.d))
     : line.d.sourcing === 'EXTERNAL' ? defaultExternal(line.d) : defaultInternal(line.d);
@@ -495,6 +500,7 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
     let contracted = ZERO, pipeline = ZERO, ext = ZERO, internal = ZERO;
     for (const st of assignments) {
       if (st.weight <= 0) continue;
+      if (st.monthRevenue[m].isZero() && st.monthExternal[m].isZero() && st.monthShortage[m].isZero() && st.monthExpenses[m].isZero() && st.monthInternal[m].isZero()) continue;
       const w = new D(st.weight);
       const rev = st.monthRevenue[m].times(w);
       if (st.a.commitment === 'PIPELINE') pipeline = pipeline.plus(rev); else contracted = contracted.plus(rev);
@@ -530,6 +536,11 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
 
   /* ------------------------------------------------ capacity results and bottlenecks */
   const weekMonth = tl.weekRanges.map(([s]) => tl.monthRanges.findIndex(([ms, me]) => s >= ms && s <= me));
+  const linesByResource = new Map<ResourceState, LineState[]>();
+  for (const l of namedLines) if (l.resource) linesByResource.set(l.resource, [...(linesByResource.get(l.resource) ?? []), l]);
+  const pooledBySkill = new Map<string | null, LineState[]>();
+  for (const { line } of pooledLines) pooledBySkill.set(line.d.skillId, [...(pooledBySkill.get(line.d.skillId) ?? []), line]);
+  const activeInMonth = (l: LineState, m: number) => { for (let s = 0; s < S; s++) if (tl.segments[s].month === m && l.segHours[s] > EPS) return true; return false; };
   const bottlenecks: Bottleneck[] = [];
   const resourceCapacity: ResourceCapacity[] = resources.map((res) => {
     const total = (arr: number[]) => arr.reduce((x, y) => x + y, 0);
@@ -538,7 +549,7 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
     res.weekPlanned.forEach((p, w) => { const excess = p - res.weekAvailable[w]; if (excess > 0.01) excessByMonth.set(weekMonth[w], (excessByMonth.get(weekMonth[w]) ?? 0) + excess); });
     for (const [m, excess] of excessByMonth) {
       bottlenecks.push({ kind: 'RESOURCE_OVERLOAD', id: res.r.id, name: res.r.name, periodKey: tl.months[m].key, excessHours: round(excess),
-        assignmentIds: [...new Set(allLines.filter((l) => l.resource === res && l.weight > 0 && l.segHours.some((h, s) => h > EPS && tl.segments[s].month === m)).map((l) => l.a.id))] });
+        assignmentIds: [...new Set((linesByResource.get(res) ?? []).filter((l) => activeInMonth(l, m)).map((l) => l.a.id))] });
     }
     return { id: res.r.id, name: res.r.name, kind: res.r.kind, internal: res.r.internal, simulated: !!res.r.simulated,
       totals: { nominal: round(total(res.weekNominal)), absence: round(total(res.weekAbsence)), nonProject: round(total(res.weekNonProject)), available: round(available), planned: round(planned),
@@ -551,7 +562,7 @@ export function computePortfolio(snapshot: EngineSnapshot, mode: PortfolioMode, 
     weeks.forEach((x, w) => { if (x.shortage > 0.01) byMonth.set(weekMonth[w], (byMonth.get(weekMonth[w]) ?? 0) + x.shortage); });
     const id = key === '*' ? null : key; const name = id ? skillName.get(id) ?? id : 'Any skill';
     for (const [m, excess] of byMonth) bottlenecks.push({ kind: 'SKILL_SHORTAGE', id, name, periodKey: tl.months[m].key, excessHours: round(excess),
-      assignmentIds: [...new Set(allLines.filter((l) => l.pooled && l.weight > 0 && l.d.skillId === id && [...l.weekShares.entries()].some(([w, sh]) => weekMonth[w] === m && sh.shortage > EPS)).map((l) => l.a.id))] });
+      assignmentIds: [...new Set((pooledBySkill.get(id) ?? []).filter((l) => [...l.weekShares.entries()].some(([w, sh]) => weekMonth[w] === m && sh.shortage > EPS)).map((l) => l.a.id))] });
     return { skillId: id, name, weeks, totalShortage: round(weeks.reduce((x, y) => x + y.shortage, 0)) };
   }).sort((x, y) => y.totalShortage - x.totalShortage);
   bottlenecks.sort((x, y) => x.periodKey.localeCompare(y.periodKey) || y.excessHours - x.excessHours);

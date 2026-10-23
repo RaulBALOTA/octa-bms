@@ -80,6 +80,7 @@ async function main() {
   const salesRole = await seedRole('SALES_MANAGER', 'Sales Manager', [
     /^calendar\.items\.(read|create|update)$/,
     /^crm\./, /^sales\./, /^contracts\.contracts\.read$/, /^communication\./,
+    /^engine\.(services|portfolio)\.(read|create|update)$/, /^engine\.(scenarios|intelligence)\.read$/,
   ]);
   const financeRole = await seedRole('FINANCE_MANAGER', 'Finance Manager', [
     /^calendar\.items\.(read|create|update)$/,

@@ -29,6 +29,23 @@ export const round = (value: number, places = 2) => { const f = 10 ** places; re
  */
 export function allocate(amount: Dec, weights: number[]): Dec[] {
   if (!weights.length) return [];
+  const centsTotal = toCents(amount).times(100).toNumber(); // an exact integer
+  if (!Number.isSafeInteger(centsTotal)) return allocateDecimal(amount, weights);
+  const sign = centsTotal < 0 ? -1 : 1; const absolute = Math.abs(centsTotal);
+  const weightSum = weights.reduce((a, b) => a + Math.max(0, b), 0);
+  if (weightSum <= 0) return weights.map((_, index) => (index === weights.length - 1 ? toCents(amount) : ZERO));
+  // Integer cents in JS numbers are exact below 2^53; floating error in a share can only move a single
+  // cent between buckets, while the total stays exact by construction (largest remainder).
+  const raw = weights.map((weight) => (absolute * Math.max(0, weight)) / weightSum);
+  const floors = raw.map(Math.floor);
+  let remainder = absolute - floors.reduce((a, b) => a + b, 0);
+  const order = raw.map((value, index) => ({ index, fraction: value - floors[index] })).sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+  for (const { index } of order) { if (remainder <= 0) break; floors[index] += 1; remainder -= 1; }
+  return floors.map((cents) => (cents === 0 ? ZERO : new D(sign * cents).div(100)));
+}
+
+/** Exact decimal variant for amounts beyond the safe-integer range. */
+function allocateDecimal(amount: Dec, weights: number[]): Dec[] {
   const totalCents = toCents(amount).times(100);
   const sign = totalCents.isNegative() ? -1 : 1;
   const absolute = totalCents.abs();
