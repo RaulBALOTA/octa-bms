@@ -73,6 +73,14 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       NODE_ENV: production
+      # Bank connections (read-only): set these in your shell or a root .env file
+      BANKING_ENABLED: ${BANKING_ENABLED:-false}
+      BANKING_ENCRYPTION_KEY: ${BANKING_ENCRYPTION_KEY:-}
+      QONTO_API_BASE: ${QONTO_API_BASE:-https://thirdparty.qonto.com}
+      QONTO_STAGING_TOKEN: ${QONTO_STAGING_TOKEN:-}
+      ENABLE_BANKING_APP_ID: ${ENABLE_BANKING_APP_ID:-}
+      ENABLE_BANKING_PRIVATE_KEY: ${ENABLE_BANKING_PRIVATE_KEY:-}
+      APP_URL: ${APP_URL:-http://localhost:8080}
     ports:
       - "3000:3000"
     depends_on:
