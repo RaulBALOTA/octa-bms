@@ -331,7 +331,11 @@ export function BankingPage() {
       {caps.error && (
         <SetupNotice
           title={t('banking.setup.title')}
-          items={[caps.error instanceof ApiError && caps.error.status === 403 ? t('banking.setup.noRead') : caps.error.message]}
+          items={[
+            caps.error instanceof ApiError && caps.error.status === 403 ? t('banking.setup.noRead')
+              : caps.error instanceof ApiError && caps.error.status === 404 ? t('banking.setup.oldApi')
+                : caps.error.message,
+          ]}
         />
       )}
       {caps.data && !ready && (
