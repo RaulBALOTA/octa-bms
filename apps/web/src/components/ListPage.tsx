@@ -185,6 +185,7 @@ export function StatusBadge({ value }: { value: string }) {
       IN_REVIEW: 'bg-warning/15 text-warning',
       IN_REPAIR: 'bg-warning/15 text-warning',
       REQUESTED: 'bg-warning/15 text-warning',
+      SUBMITTED: 'bg-warning/15 text-warning',
       APPROVED: 'bg-success/15 text-success',
       REJECTED: 'bg-destructive/15 text-destructive',
       CANCELLED: 'bg-muted text-muted-foreground',
