@@ -10,6 +10,8 @@ import { ipBucket } from './crypto';
 import { EmailNotificationService } from './email-notification.service';
 import { MfaChallengeService } from './mfa-challenge.service';
 import { MfaService } from './mfa.service';
+import { PasskeyService } from './passkey.service';
+import type { AuthenticationResponseJSON } from '@simplewebauthn/server';
 import { PasswordService } from './password.service';
 import { RATE_LIMITS, RateLimitService } from './rate-limit.service';
 import { RecoveryService } from './recovery.service';
@@ -45,6 +47,7 @@ export class AuthService {
     private readonly sessions: SessionService,
     private readonly challenges: MfaChallengeService,
     private readonly mfa: MfaService,
+    private readonly passkeys: PasskeyService,
     private readonly recovery: RecoveryService,
     private readonly policy: SecurityPolicyService,
     private readonly limits: RateLimitService,
@@ -145,6 +148,7 @@ export class AuthService {
     if (challenge.purpose !== 'LOGIN') throw new AuthError('MFA_CHALLENGE_INVALID');
     await this.limits.assertHit(RATE_LIMITS.mfaIp, ipBucket(req.ip));
     await this.limits.assertBelow(RATE_LIMITS.mfaUserFailures, challenge.userId);
+    if ((await this.policy.methodsFor(challenge.userId)).passkeyRequired) throw new AuthError('PASSKEY_REQUIRED');
     if (!(await this.challenges.reserveAttempt(challenge.id))) throw new AuthError('MFA_CHALLENGE_INVALID');
     const user = await this.userForChallenge(challenge);
 
@@ -162,6 +166,38 @@ export class AuthService {
     }
     await this.audit.record({ action: 'mfa.totp.verify', outcome: 'success', actorUserId: user.id, targetUserId: user.id, req });
     const session = await this.startSession(user, { mfa: true, method: challenge.authMethod as 'password' | 'oidc', via: 'totp' }, req, res);
+    return { status: 'AUTHENTICATED', csrfToken: session.csrfToken };
+  }
+
+  /** Methods offered on the second-factor screen (only after the password step). */
+  async loginMethods(challenge: MfaChallenge) {
+    if (challenge.purpose !== 'LOGIN') throw new AuthError('MFA_CHALLENGE_INVALID');
+    const methods = await this.policy.methodsFor(challenge.userId);
+    return { ...methods, recoveryCode: (await this.recovery.remaining(challenge.userId)) > 0 };
+  }
+
+  async passkeyLoginOptions(challenge: MfaChallenge, req: Request) {
+    if (challenge.purpose !== 'LOGIN') throw new AuthError('MFA_CHALLENGE_INVALID');
+    await this.limits.assertHit(RATE_LIMITS.mfaIp, ipBucket(req.ip));
+    if (!(await this.policy.methodsFor(challenge.userId)).passkey) throw new AuthError('PASSKEY_INVALID', 'No passkey is available for this account');
+    return this.passkeys.authenticationOptions(challenge.userId, 'AUTHENTICATE', challenge.id);
+  }
+
+  async verifyPasskeyLogin(challenge: MfaChallenge, response: AuthenticationResponseJSON, req: Request, res: Response): Promise<PrimaryAuthResult> {
+    if (challenge.purpose !== 'LOGIN') throw new AuthError('MFA_CHALLENGE_INVALID');
+    await this.limits.assertHit(RATE_LIMITS.mfaIp, ipBucket(req.ip));
+    await this.limits.assertBelow(RATE_LIMITS.mfaUserFailures, challenge.userId);
+    if (!(await this.challenges.reserveAttempt(challenge.id))) throw new AuthError('MFA_CHALLENGE_INVALID');
+    const user = await this.userForChallenge(challenge);
+    const ok = await this.passkeys.authenticate(user.id, 'AUTHENTICATE', challenge.id, response);
+    if (!ok) {
+      await this.limits.hit(RATE_LIMITS.mfaUserFailures, user.id);
+      await this.audit.record({ action: 'mfa.passkey.verify', outcome: 'failure', targetUserId: user.id, req });
+      throw new AuthError('PASSKEY_INVALID');
+    }
+    if (!(await this.challenges.consume(challenge.id))) throw new AuthError('MFA_CHALLENGE_INVALID');
+    await this.audit.record({ action: 'mfa.passkey.verify', outcome: 'success', actorUserId: user.id, targetUserId: user.id, req });
+    const session = await this.startSession(user, { mfa: true, method: challenge.authMethod as 'password' | 'oidc', via: 'passkey' }, req, res);
     return { status: 'AUTHENTICATED', csrfToken: session.csrfToken };
   }
 
@@ -226,31 +262,55 @@ export class AuthService {
     clearAuthCookies(res, this.config);
   }
 
-  /** Step-up: TOTP when a factor is active, otherwise the current password. Rotates the session id. */
+  /**
+   * Step-up: a second factor when one is active (passkey or TOTP — passkey only when the
+   * policy requires it for this administrator), otherwise the current password.
+   * Rotates the session id.
+   */
   async stepUp(session: AuthSession, input: { code?: string; password?: string }, req: Request, res: Response) {
     await this.limits.assertBelow(RATE_LIMITS.stepUpUserFailures, session.userId);
-    const factor = await this.mfa.activeAuthenticator(session.userId);
+    const methods = await this.policy.methodsFor(session.userId);
+    const factors = await this.policy.factors(session.userId);
+    const hasFactor = factors.totp || factors.passkeys > 0;
+    if (methods.passkeyRequired && input.code) throw new AuthError('PASSKEY_REQUIRED');
     let ok = false;
-    if (factor) {
-      ok = !!input.code && (await this.mfa.verify(session.userId, input.code));
+    if (hasFactor) {
+      ok = methods.totp && !!input.code && (await this.mfa.verify(session.userId, input.code));
     } else if (input.password) {
       const user = await this.prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
       ok = !!user.passwordHash && (await this.passwords.verify(user.passwordHash, input.password)).valid;
     }
+    return this.finishStepUp(session, ok, hasFactor, hasFactor ? 'totp' : 'password', req, res);
+  }
+
+  async stepUpPasskeyOptions(session: AuthSession) {
+    if (!(await this.policy.methodsFor(session.userId)).passkey) throw new AuthError('PASSKEY_INVALID', 'No passkey is available for this account');
+    return this.passkeys.authenticationOptions(session.userId, 'STEP_UP', session.id);
+  }
+
+  async stepUpPasskey(session: AuthSession, response: AuthenticationResponseJSON, req: Request, res: Response) {
+    await this.limits.assertBelow(RATE_LIMITS.stepUpUserFailures, session.userId);
+    const ok = await this.passkeys.authenticate(session.userId, 'STEP_UP', session.id, response);
+    return this.finishStepUp(session, ok, true, 'passkey', req, res);
+  }
+
+  private async finishStepUp(session: AuthSession, ok: boolean, mfa: boolean, method: string, req: Request, res: Response) {
     if (!ok) {
       await this.limits.hit(RATE_LIMITS.stepUpUserFailures, session.userId);
-      await this.audit.record({ action: 'auth.step_up', outcome: 'failure', actorUserId: session.userId, targetUserId: session.userId, req, context: { method: factor ? 'totp' : 'password' } });
+      await this.audit.record({ action: 'auth.step_up', outcome: 'failure', actorUserId: session.userId, targetUserId: session.userId, req, context: { method } });
       throw new AuthError('STEP_UP_INVALID');
     }
-    const rotated = await this.sessions.rotate(session, { mfa: !!factor, reauth: true, req });
+    const rotated = await this.sessions.rotate(session, { mfa, reauth: true, req });
     setSessionCookie(res, this.config, rotated.token, rotated.session.absoluteExpiresAt);
-    await this.audit.record({ action: 'auth.step_up', outcome: 'success', actorUserId: session.userId, targetUserId: session.userId, req, context: { method: factor ? 'totp' : 'password' } });
-    return { csrfToken: rotated.session.csrfToken, verifiedAt: new Date(), validForMinutes: this.config.mfa.stepUpMaxAgeMinutes };
+    await this.audit.record({ action: 'auth.step_up', outcome: 'success', actorUserId: session.userId, targetUserId: session.userId, req, context: { method } });
+    const policy = await this.policy.get();
+    return { csrfToken: rotated.session.csrfToken, verifiedAt: new Date(), validForMinutes: policy.stepUpMaxAgeMinutes };
   }
 
   async stepUpMethod(userId: string) {
-    const factor = await this.mfa.activeAuthenticator(userId);
-    return { method: factor ? ('totp' as const) : ('password' as const), maxAgeMinutes: this.config.mfa.stepUpMaxAgeMinutes };
+    const [methods, factors, policy] = await Promise.all([this.policy.methodsFor(userId), this.policy.factors(userId), this.policy.get()]);
+    const available = [...(methods.passkey ? ['passkey'] : []), ...(methods.totp ? ['totp'] : []), ...(!factors.totp && !factors.passkeys ? ['password'] : [])] as ('passkey' | 'totp' | 'password')[];
+    return { method: available[0] ?? 'password', methods: available, maxAgeMinutes: policy.stepUpMaxAgeMinutes };
   }
 
   /** Minimal identity, memberships, effective permissions and security posture. */
@@ -274,13 +334,19 @@ export class AuthService {
         })).map((company, index) => ({ isDefault: defaultCompany ? company.id === defaultCompany.id : index === 0, company }))
       : user.memberships;
     const permissions = user.isSystemAdmin ? ['*'] : [...(await this.rbac.getPermissions(user.id, defaultCompany?.id ?? null))];
-    const [status, requirement] = await Promise.all([this.mfa.status(user.id), this.policy.requirement(user.id, user)]);
+    const [status, requirement, passkeyEligible, policy] = await Promise.all([
+      this.mfa.status(user.id), this.policy.requirement(user.id, user), this.passkeys.isEligible(user.id), this.policy.get(),
+    ]);
     const { mfaRequired: _cohort, ...profile } = user;
     return {
       ...profile,
       memberships,
       permissions,
-      mfa: { ...status, required: requirement.required, enrollmentDue: requirement.enrollmentDue },
+      mfa: {
+        ...status, required: requirement.required, enrollmentDue: requirement.enrollmentDue,
+        passkeyEligible: passkeyEligible && policy.passkeysEnabled,
+        passkeyRequired: policy.requirePasskeyForAdmins && user.isSystemAdmin,
+      },
       session: session ? { id: session.id, lastMfaAt: session.lastMfaAt, absoluteExpiresAt: session.absoluteExpiresAt, idleExpiresAt: session.idleExpiresAt } : undefined,
     };
   }

@@ -180,6 +180,15 @@ describe('configuration validation', () => {
     expect(() => loadAuthConfig({ ...prodEnv, ...override } as NodeJS.ProcessEnv)).toThrow(AuthConfigError);
   });
 
+  it('derives the WebAuthn RP ID from the public origin and rejects IPs or foreign domains', () => {
+    expect(loadAuthConfig(prodEnv).webauthn).toEqual({ rpId: 'bms.example.invalid', rpName: 'OCTA BMS', origins: ['https://bms.example.invalid'] });
+    expect(loadAuthConfig({ ...prodEnv, WEBAUTHN_RP_ID: 'example.invalid' }).webauthn.rpId).toBe('example.invalid');
+    expect(() => loadAuthConfig({ ...prodEnv, WEBAUTHN_RP_ID: 'evil.example' })).toThrow(AuthConfigError);
+    expect(() => loadAuthConfig({ ...prodEnv, APP_PUBLIC_ORIGIN: 'https://10.0.0.5' })).toThrow(AuthConfigError);
+    expect(devConfig.webauthn.rpId).toBe('localhost');
+    expect(devConfig.webauthn.origins.every((o) => new URL(o).hostname === 'localhost')).toBe(true);
+  });
+
   it('defaults: 60 min idle, 12 h absolute, optional MFA, 10 min step-up, ±1 step', () => {
     expect(devConfig.session).toMatchObject({ idleMinutes: 60, absoluteHours: 12 });
     expect(devConfig.mfa).toMatchObject({ defaultMode: 'OPTIONAL', stepUpMaxAgeMinutes: 10, window: 1, preAuthTtlSeconds: 300, periodSeconds: 30, digits: 6 });

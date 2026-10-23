@@ -133,12 +133,13 @@ export class RecentAuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const session = req.authSession;
     if (!session) throw new AuthError('UNAUTHENTICATED');
-    const requirement = await this.policy.requirement(session.userId, { mfaRequired: false });
-    const method = requirement.challenge ? 'totp' : 'password';
-    const verifiedAt = requirement.challenge ? session.lastMfaAt : session.lastReauthAt;
-    const maxAgeMs = this.config.mfa.stepUpMaxAgeMinutes * 60_000;
+    const [factors, methods, policy] = await Promise.all([this.policy.factors(session.userId), this.policy.methodsFor(session.userId), this.policy.get()]);
+    const hasFactor = factors.totp || factors.passkeys > 0;
+    const verifiedAt = hasFactor ? session.lastMfaAt : session.lastReauthAt;
+    const maxAgeMs = policy.stepUpMaxAgeMinutes * 60_000;
     if (!verifiedAt || Date.now() - verifiedAt.getTime() > maxAgeMs) {
-      throw new AuthError('STEP_UP_REQUIRED', undefined, { method, maxAgeMinutes: this.config.mfa.stepUpMaxAgeMinutes });
+      const available = hasFactor ? [...(methods.passkey ? ['passkey'] : []), ...(methods.totp ? ['totp'] : [])] : ['password'];
+      throw new AuthError('STEP_UP_REQUIRED', undefined, { method: available[0], methods: available, maxAgeMinutes: policy.stepUpMaxAgeMinutes });
     }
     return true;
   }

@@ -25,11 +25,11 @@ function arg(name: string): string | undefined {
 async function listAdmins() {
   const admins = await prisma.user.findMany({
     where: { isSystemAdmin: true, deletedAt: null },
-    select: { email: true, isActive: true, lastLoginAt: true, mfaAuthenticators: { where: { status: 'ACTIVE' }, select: { confirmedAt: true } }, recoveryCodes: { where: { usedAt: null, revokedAt: null }, select: { id: true } } },
+    select: { email: true, isActive: true, lastLoginAt: true, mfaAuthenticators: { where: { status: 'ACTIVE' }, select: { confirmedAt: true } }, webauthnCredentials: { where: { revokedAt: null }, select: { id: true } }, recoveryCodes: { where: { usedAt: null, revokedAt: null }, select: { id: true } } },
     orderBy: { email: 'asc' },
   });
-  console.table(admins.map((a) => ({ email: a.email, active: a.isActive, mfa: a.mfaAuthenticators.length > 0, recoveryCodes: a.recoveryCodes.length, lastLogin: a.lastLoginAt?.toISOString() ?? '-' })));
-  const ready = admins.filter((a) => a.isActive && a.mfaAuthenticators.length && a.recoveryCodes.length).length;
+  console.table(admins.map((a) => ({ email: a.email, active: a.isActive, totp: a.mfaAuthenticators.length > 0, passkeys: a.webauthnCredentials.length, recoveryCodes: a.recoveryCodes.length, lastLogin: a.lastLoginAt?.toISOString() ?? '-' })));
+  const ready = admins.filter((a) => a.isActive && (a.mfaAuthenticators.length || a.webauthnCredentials.length) && a.recoveryCodes.length).length;
   console.log(`${ready} administrator(s) with MFA and recovery codes — enforcement requires at least 2.`);
 }
 
@@ -45,6 +45,8 @@ async function breakGlass() {
   await prisma.$transaction([
     prisma.mfaAuthenticator.updateMany({ where: { userId: user.id, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: now } }),
     prisma.recoveryCode.updateMany({ where: { userId: user.id, usedAt: null, revokedAt: null }, data: { revokedAt: now } }),
+    prisma.webAuthnCredential.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: now } }),
+    prisma.webAuthnChallenge.updateMany({ where: { userId: user.id, consumedAt: null }, data: { consumedAt: now } }),
     prisma.mfaEnrollment.updateMany({ where: { userId: user.id, consumedAt: null }, data: { consumedAt: now } }),
     prisma.mfaChallenge.updateMany({ where: { userId: user.id, consumedAt: null }, data: { consumedAt: now } }),
     prisma.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: now, revokeReason: 'MFA_RESET' } }),

@@ -15,7 +15,9 @@ export type SecurityEmail =
   | { kind: 'recovery-code-used'; remaining: number }
   | { kind: 'new-sign-in'; when: string; device: string }
   | { kind: 'account-disabled' }
-  | { kind: 'role-granted'; role: string };
+  | { kind: 'role-granted'; role: string }
+  | { kind: 'passkey-added'; name: string }
+  | { kind: 'passkey-removed' };
 
 const NOT_YOU = 'If this was not you, contact your OCTA BMS administrator immediately.';
 
@@ -42,6 +44,10 @@ function render(email: SecurityEmail, appUrl: string): { subject: string; text: 
       return { subject: 'New sign-in to OCTA BMS', text: `New sign-in at ${email.when} (${email.device}).\n\n${NOT_YOU}\n${security}` };
     case 'account-disabled':
       return { subject: 'Your OCTA BMS account was disabled', text: `Your account was disabled and all sessions ended.\n\n${NOT_YOU}` };
+    case 'passkey-added':
+      return { subject: 'Passkey added to your OCTA BMS account', text: `A passkey ("${email.name}") was registered for your account.\n\n${NOT_YOU}\n${security}` };
+    case 'passkey-removed':
+      return { subject: 'Passkey removed from your OCTA BMS account', text: `A passkey was removed from your account.\n\n${NOT_YOU}\n${security}` };
     case 'role-granted':
       return { subject: 'New role on your OCTA BMS account', text: `The role "${email.role}" was granted to your account.\n\n${NOT_YOU}\n${security}` };
   }

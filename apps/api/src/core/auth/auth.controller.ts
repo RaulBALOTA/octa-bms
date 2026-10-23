@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, Length, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsObject, IsOptional, IsString, Length, Matches, MaxLength, MinLength } from 'class-validator';
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import type { Response } from 'express';
 import { AccountTokensService } from '../security/account-tokens.service';
 import { AUTH_CONFIG, type AuthConfig } from '../security/auth-config';
@@ -9,6 +10,7 @@ import { AuthService } from '../security/auth.service';
 import { setSessionCookie } from '../security/cookies';
 import { EmailNotificationService } from '../security/email-notification.service';
 import { MfaService } from '../security/mfa.service';
+import { PasskeyService } from '../security/passkey.service';
 import { RATE_LIMITS, RateLimitService } from '../security/rate-limit.service';
 import { RecoveryService } from '../security/recovery.service';
 import { SecurityAuditService } from '../security/security-audit.service';
@@ -54,6 +56,16 @@ class AcceptInvitationDto {
 class TokenQuery {
   @IsString() @Length(20, 128) token!: string;
 }
+class PasskeyResponseDto {
+  // shape is verified cryptographically by @simplewebauthn/server; body size is capped by the JSON parser
+  @IsObject() response!: Record<string, unknown>;
+}
+class PasskeyRegisterDto extends PasskeyResponseDto {
+  @IsString() @MinLength(1) @MaxLength(60) name!: string;
+}
+class PasskeyRenameDto {
+  @IsString() @MinLength(1) @MaxLength(60) name!: string;
+}
 class DisableMfaDto {
   @IsString() @Matches(/^\d{6}$/) code!: string;
 }
@@ -70,6 +82,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly tokens: AccountTokensService,
     private readonly mfa: MfaService,
+    private readonly passkeys: PasskeyService,
     private readonly recovery: RecoveryService,
     private readonly sessions: SessionService,
     private readonly policy: SecurityPolicyService,
@@ -110,6 +123,30 @@ export class AuthController {
   recoveryLogin(@Body() dto: RecoveryCodeDto, @Req() req: AuthenticatedRequest, @Res({ passthrough: true }) res: Response) {
     if (!req.preAuth) throw new AuthError('MFA_CHALLENGE_INVALID');
     return this.auth.redeemRecoveryCode(req.preAuth, dto.code, req, res);
+  }
+
+  /** Second-factor methods for this sign-in (only after the password step). */
+  @AllowPreAuth()
+  @Get('mfa/methods')
+  methods(@Req() req: AuthenticatedRequest) {
+    if (!req.preAuth) throw new AuthError('MFA_CHALLENGE_INVALID');
+    return this.auth.loginMethods(req.preAuth);
+  }
+
+  @AllowPreAuth()
+  @Post('mfa/passkey/options')
+  @HttpCode(200)
+  passkeyLoginOptions(@Req() req: AuthenticatedRequest) {
+    if (!req.preAuth) throw new AuthError('MFA_CHALLENGE_INVALID');
+    return this.auth.passkeyLoginOptions(req.preAuth, req);
+  }
+
+  @AllowPreAuth()
+  @Post('mfa/passkey/verify')
+  @HttpCode(200)
+  passkeyLogin(@Body() dto: PasskeyResponseDto, @Req() req: AuthenticatedRequest, @Res({ passthrough: true }) res: Response) {
+    if (!req.preAuth) throw new AuthError('MFA_CHALLENGE_INVALID');
+    return this.auth.verifyPasskeyLogin(req.preAuth, dto.response as unknown as AuthenticationResponseJSON, req, res);
   }
 
   @Public()
@@ -179,11 +216,15 @@ export class AuthController {
       const policy = await this.policy.get();
       const existing = await this.mfa.activeAuthenticator(req.user.id);
       if (policy.mfaMode === 'DISABLED' && !existing) throw new AuthError('FORBIDDEN', 'MFA enrollment is disabled by policy');
-      // replacing a factor needs the current factor; a first factor needs the password —
-      // otherwise a hijacked session could bind the attacker's authenticator to the account
-      const verifiedAt = existing ? req.authSession.lastMfaAt : req.authSession.lastReauthAt;
-      if (!verifiedAt || Date.now() - verifiedAt.getTime() > this.config.mfa.stepUpMaxAgeMinutes * 60_000) {
-        throw new AuthError('STEP_UP_REQUIRED', undefined, { method: existing ? 'totp' : 'password', maxAgeMinutes: this.config.mfa.stepUpMaxAgeMinutes });
+      // adding/replacing a factor next to an existing one needs a current factor; a first
+      // factor needs the password — otherwise a hijacked session could bind the attacker's
+      // authenticator to the account
+      const factors = await this.policy.factors(req.user.id);
+      const hasFactor = factors.totp || factors.passkeys > 0;
+      const verifiedAt = hasFactor ? req.authSession.lastMfaAt : req.authSession.lastReauthAt;
+      if (!verifiedAt || Date.now() - verifiedAt.getTime() > policy.stepUpMaxAgeMinutes * 60_000) {
+        const step = await this.auth.stepUpMethod(req.user.id);
+        throw new AuthError('STEP_UP_REQUIRED', undefined, { method: step.method, methods: step.methods, maxAgeMinutes: policy.stepUpMaxAgeMinutes });
       }
       return req.user.id;
     }
@@ -244,10 +285,99 @@ export class AuthController {
     return this.auth.stepUp(session(req).session, dto, req, res);
   }
 
+  @Post('step-up/passkey/options')
+  @HttpCode(200)
+  stepUpPasskeyOptions(@Req() req: AuthenticatedRequest) {
+    return this.auth.stepUpPasskeyOptions(session(req).session);
+  }
+
+  @Post('step-up/passkey/verify')
+  @HttpCode(200)
+  stepUpPasskey(@Body() dto: PasskeyResponseDto, @Req() req: AuthenticatedRequest, @Res({ passthrough: true }) res: Response) {
+    return this.auth.stepUpPasskey(session(req).session, dto.response as unknown as AuthenticationResponseJSON, req, res);
+  }
+
+  // ------------------------------------------------------------ passkeys (administrators)
+
+  private async assertPasskeyEligible(userId: string) {
+    const policy = await this.policy.get();
+    if (!policy.passkeysEnabled) throw new AuthError('FORBIDDEN', 'Passkeys are disabled by policy');
+    if (!(await this.passkeys.isEligible(userId))) throw new AuthError('FORBIDDEN', 'Passkeys are available to administrators');
+  }
+
+  @Get('passkeys')
+  async listPasskeys(@Req() req: AuthenticatedRequest) {
+    const { user } = session(req);
+    return { eligible: (await this.passkeys.isEligible(user.id)) && (await this.policy.get()).passkeysEnabled, passkeys: await this.passkeys.list(user.id) };
+  }
+
+  /** Registration needs a recent verification: current factor, or password for a first factor. */
+  @RequireRecentAuth()
+  @Post('passkeys/register/options')
+  @HttpCode(200)
+  async passkeyRegisterOptions(@Req() req: AuthenticatedRequest) {
+    const { user, session: s } = session(req);
+    await this.assertPasskeyEligible(user.id);
+    await this.limits.assertHit(RATE_LIMITS.enrollUserFailures, user.id);
+    const profile = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { id: true, email: true, displayName: true } });
+    return this.passkeys.registrationOptions(profile, s.id);
+  }
+
+  @RequireRecentAuth()
+  @Post('passkeys/register/verify')
+  @HttpCode(200)
+  async passkeyRegister(@Body() dto: PasskeyRegisterDto, @Req() req: AuthenticatedRequest, @Res({ passthrough: true }) res: Response) {
+    const { user, session: s } = session(req);
+    await this.assertPasskeyEligible(user.id);
+    let result: Awaited<ReturnType<PasskeyService['register']>>;
+    try {
+      result = await this.passkeys.register(user.id, s.id, dto.response as unknown as RegistrationResponseJSON, dto.name);
+    } catch (error) {
+      await this.limits.hit(RATE_LIMITS.enrollUserFailures, user.id);
+      await this.audit.record({ action: 'mfa.passkey.registered', outcome: 'failure', actorUserId: user.id, targetUserId: user.id, req });
+      throw error;
+    }
+    await this.audit.record({ action: 'mfa.passkey.registered', outcome: 'success', actorUserId: user.id, targetUserId: user.id, req, context: { passkeyId: result.passkey.id, synced: result.passkey.backedUp } });
+    this.email.notify(user.email, { kind: 'passkey-added', name: result.passkey.name }, user.id);
+    // a new factor: other sessions without it are re-checked by policy; rotate this one
+    const rotated = await this.sessions.rotate(s, { mfa: true, reauth: true, req });
+    setSessionCookie(res, this.config, rotated.token, rotated.session.absoluteExpiresAt);
+    return { passkey: result.passkey, recoveryCodes: result.recoveryCodes, csrfToken: rotated.session.csrfToken };
+  }
+
+  @Patch('passkeys/:id')
+  async renamePasskey(@Param('id') id: string, @Body() dto: PasskeyRenameDto, @Req() req: AuthenticatedRequest) {
+    const { user } = session(req);
+    await this.passkeys.rename(user.id, id, dto.name);
+    return { id, name: dto.name.trim() };
+  }
+
+  /** Removing a passkey: step-up; never the last factor when MFA is required, nor an admin's last passkey when passkeys are required. */
+  @RequireRecentAuth()
+  @Delete('passkeys/:id')
+  @HttpCode(204)
+  async removePasskey(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const { user } = session(req);
+    // ownership first: another user's passkey id is simply "not found"
+    if (!(await this.prisma.webAuthnCredential.count({ where: { id, userId: user.id, revokedAt: null } }))) throw new AuthError('FORBIDDEN', 'Passkey not found');
+    const [factors, policy, record] = await Promise.all([
+      this.policy.factors(user.id), this.policy.get(),
+      this.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { isSystemAdmin: true, mfaRequired: true, email: true } }),
+    ]);
+    const requirement = this.policy.requirementFor(policy, record, false);
+    const lastFactor = factors.passkeys <= 1 && !factors.totp;
+    if (lastFactor && (requirement.required || record.isSystemAdmin)) throw new AuthError('MFA_REQUIRED_BY_POLICY', 'This is your last second factor; register another one first');
+    if (factors.passkeys <= 1 && policy.requirePasskeyForAdmins && record.isSystemAdmin) throw new AuthError('PASSKEY_REQUIRED', 'Administrators must keep at least one passkey');
+    await this.passkeys.revoke(user.id, id);
+    await this.audit.record({ action: 'mfa.passkey.removed', outcome: 'success', actorUserId: user.id, targetUserId: user.id, req, context: { passkeyId: id } });
+    this.email.notify(record.email, { kind: 'passkey-removed' }, user.id);
+  }
+
   @Get('recovery-codes/status')
   async recoveryStatus(@Req() req: AuthenticatedRequest) {
     const { user } = session(req);
-    const enrolled = !!(await this.mfa.activeAuthenticator(user.id));
+    const factors = await this.policy.factors(user.id);
+    const enrolled = factors.totp || factors.passkeys > 0;
     return { enrolled, remaining: enrolled ? await this.recovery.remaining(user.id) : 0 };
   }
 
@@ -256,7 +386,8 @@ export class AuthController {
   @HttpCode(200)
   async rotateRecoveryCodes(@Req() req: AuthenticatedRequest) {
     const { user } = session(req);
-    if (!(await this.mfa.activeAuthenticator(user.id))) throw new AuthError('MFA_NOT_ENROLLED', 'Register an authenticator first');
+    const factors = await this.policy.factors(user.id);
+    if (!factors.totp && !factors.passkeys) throw new AuthError('MFA_NOT_ENROLLED', 'Register an authenticator or passkey first');
     const codes = await this.recovery.generate(user.id);
     await this.audit.record({ action: 'mfa.recovery_codes.rotated', outcome: 'success', actorUserId: user.id, targetUserId: user.id, req });
     this.email.notify(user.email, { kind: 'recovery-codes-rotated' }, user.id);

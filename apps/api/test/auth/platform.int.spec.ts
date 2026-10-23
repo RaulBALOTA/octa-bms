@@ -69,7 +69,7 @@ describe('route coverage map (deny by default)', () => {
     expect(all.filter((r) => r.isPublic).map((r) => `${r.method} ${r.path}`).sort()).toEqual([...PUBLIC].sort());
     const unreviewed = all.filter((r) => !r.isPublic && !r.permissions.length && !SELF_SERVICE.some((rx) => rx.test(r.path)));
     expect(unreviewed.map((r) => `${r.method} ${r.path}`)).toEqual([]);
-    expect(all.filter((r) => r.preAuth).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['POST /auth/mfa/enroll/confirm', 'POST /auth/mfa/enroll/start', 'POST /auth/mfa/recovery', 'POST /auth/mfa/verify']);
+    expect(all.filter((r) => r.preAuth).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['GET /auth/mfa/methods', 'POST /auth/mfa/enroll/confirm', 'POST /auth/mfa/enroll/start', 'POST /auth/mfa/passkey/options', 'POST /auth/mfa/passkey/verify', 'POST /auth/mfa/recovery', 'POST /auth/mfa/verify']);
     if (process.env.WRITE_ROUTE_MAP) {
       const rows = all.map((r) => `| ${r.method} | \`${r.path}\` | ${r.isPublic ? 'public' : r.preAuth ? 'session or pre-auth' : 'session'} | ${r.permissions.join(', ') || (r.isPublic ? '—' : 'self-service / in-code check')} | ${r.stepUp ? 'yes' : ''} |`);
       writeFileSync(process.env.WRITE_ROUTE_MAP, `| Method | Route (/api/v1) | Authentication | Permission | Step-up |\n|---|---|---|---|---|\n${rows.join('\n')}\n`);
@@ -163,9 +163,10 @@ describe('#22 additive migration on a pre-existing database', () => {
       const fingerprint = () => root.$queryRawUnsafe<{ f: string }[]>(`SELECT md5(string_agg(concat_ws('|', id, email, "passwordHash", "isActive", "isSystemAdmin", "firstName"), ',' ORDER BY id)) AS f FROM "${schema}"."users"`);
       const before = (await fingerprint())[0].f;
 
-      const migration = join(__dirname, '../../prisma/sql/add_secure_auth.sql');
-      psql(migration);
-      psql(migration); // idempotent
+      for (let run = 0; run < 2; run++) { // idempotent: each script applied twice, in order
+        psql(join(__dirname, '../../prisma/sql/add_secure_auth.sql'));
+        psql(join(__dirname, '../../prisma/sql/add_passkeys.sql'));
+      }
 
       expect((await fingerprint())[0].f).toBe(before);
       const users = await root.$queryRawUnsafe<{ id: string; emailNormalized: string; status: string }[]>(`SELECT id, "emailNormalized", status::text FROM "${schema}"."users" ORDER BY id`);

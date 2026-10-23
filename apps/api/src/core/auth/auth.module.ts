@@ -14,6 +14,7 @@ import { SecurityMaintenanceService } from '../security/maintenance.service';
 import { MfaChallengeService } from '../security/mfa-challenge.service';
 import { MfaRecoveryService } from '../security/mfa-recovery.service';
 import { MfaService } from '../security/mfa.service';
+import { PasskeyService } from '../security/passkey.service';
 import { PasswordService } from '../security/password.service';
 import { RateLimitService } from '../security/rate-limit.service';
 import { RecoveryService } from '../security/recovery.service';
@@ -37,6 +38,7 @@ import { KEY_RING } from '../security/tokens';
     MfaChallengeService,
     MfaRecoveryService,
     MfaService,
+    PasskeyService,
     PasswordService,
     RateLimitService,
     RecoveryService,

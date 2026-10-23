@@ -33,6 +33,7 @@ export interface AuthConfig {
   trustProxy: string | number | boolean;
   securityEventRetentionDays: number;
   oidcAutoProvision: boolean;
+  webauthn: { rpId: string; rpName: string; origins: string[] };
 }
 
 export class AuthConfigError extends Error {}
@@ -128,6 +129,13 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
   if (production && !secure) throw new AuthConfigError('APP_PUBLIC_ORIGIN must use https in production');
   if (production && !hostPrefix) throw new AuthConfigError('SESSION_COOKIE_NAME must use the __Host- prefix in production');
 
+  // WebAuthn relying party = the SPA's registrable host (IP addresses are not valid RP IDs)
+  const rpId = (env.WEBAUTHN_RP_ID ?? new URL(publicOrigin).hostname).toLowerCase();
+  if (!/^[a-z0-9.-]+$/.test(rpId) || /^\d+(\.\d+){3}$/.test(rpId)) throw new AuthConfigError('WEBAUTHN_RP_ID must be a domain name (not an IP address)');
+  if (!allowedOrigins.some((o) => { const host = new URL(o).hostname; return host === rpId || host.endsWith(`.${rpId}`); })) {
+    throw new AuthConfigError('WEBAUTHN_RP_ID must be the host of APP_PUBLIC_ORIGIN or a parent domain of it');
+  }
+
   const issuer = (env.MFA_TOTP_ISSUER ?? 'OCTA BMS').trim();
   if (!issuer || issuer.length > 64 || issuer.includes(':')) throw new AuthConfigError('MFA_TOTP_ISSUER must be 1–64 characters without ":"');
 
@@ -170,6 +178,12 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
     trustProxy: parseTrustProxy(env.TRUST_PROXY),
     securityEventRetentionDays: int(env, 'SECURITY_EVENT_RETENTION_DAYS', 400, 30, 3650),
     oidcAutoProvision: env.ENTRA_AUTO_PROVISION === 'true',
+    webauthn: {
+      rpId,
+      rpName: (env.WEBAUTHN_RP_NAME ?? issuer).slice(0, 64),
+      // only origins whose host belongs to the RP ID can complete a ceremony
+      origins: allowedOrigins.filter((o) => { const host = new URL(o).hostname; return host === rpId || host.endsWith(`.${rpId}`); }),
+    },
   };
 }
 

@@ -230,6 +230,8 @@ model User {
   oneTimeTokens            OneTimeToken[]
   recoveryRequestsAsTarget MfaRecoveryRequest[]     @relation("RecoveryTarget")
   invitationsSent          Invitation[]             @relation("InvitationSender")
+  webauthnCredentials      WebAuthnCredential[]
+  webauthnChallenges       WebAuthnChallenge[]
 
   @@index([email])
   @@index([isActive])
@@ -501,16 +503,67 @@ enum MfaPolicyMode {
 // Global authentication policy (single row id = "global"). Env MFA_REQUIRED_MODE is
 // the default until an administrator saves a policy.
 model SecurityPolicy {
-  id                   String        @id @default("global")
-  mfaMode              MfaPolicyMode @default(OPTIONAL)
-  enrollmentDeadline   DateTime?
-  sessionIdleMinutes   Int?
-  sessionAbsoluteHours Int?
-  updatedById          String?
-  updatedAt            DateTime      @updatedAt
-  createdAt            DateTime      @default(now())
+  id                      String        @id @default("global")
+  mfaMode                 MfaPolicyMode @default(OPTIONAL)
+  enrollmentDeadline      DateTime?
+  sessionIdleMinutes      Int?
+  sessionAbsoluteHours    Int?
+  stepUpMaxAgeMinutes     Int?
+  passkeysEnabled         Boolean       @default(true)
+  // system administrators must use a passkey (TOTP refused once they have one)
+  requirePasskeyForAdmins Boolean       @default(false)
+  updatedById             String?
+  updatedAt               DateTime      @updatedAt
+  createdAt               DateTime      @default(now())
 
   @@map("security_policies")
+}
+
+// Passkey (WebAuthn) credential — phishing-resistant factor offered to administrators.
+// Public keys are not secret; the private key never leaves the user's device.
+model WebAuthnCredential {
+  id           String    @id @default(cuid())
+  userId       String
+  credentialId String    @unique // base64url credential id
+  publicKey    Bytes // COSE public key
+  counter      BigInt    @default(0)
+  transports   String[]
+  aaguid       String?
+  deviceType   String // singleDevice | multiDevice (synced passkey)
+  backedUp     Boolean   @default(false)
+  name         String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("webauthn_credentials")
+}
+
+enum WebAuthnChallengePurpose {
+  REGISTER
+  AUTHENTICATE // second factor at sign-in (bound to an MFA challenge)
+  STEP_UP // re-verification inside a session
+}
+
+// Single-use WebAuthn challenge, bound to the session or pre-auth challenge that asked for it.
+model WebAuthnChallenge {
+  id         String                   @id @default(cuid())
+  userId     String
+  purpose    WebAuthnChallengePurpose
+  challenge  String                   @unique
+  bindingId  String // AuthSession.id or MfaChallenge.id
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime                 @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("webauthn_challenges")
 }
 
 // Shared fixed-window rate-limit counters (atomic upsert; works across API instances).

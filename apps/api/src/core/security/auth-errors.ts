@@ -19,7 +19,9 @@ export type AuthErrorCode =
   | 'PASSWORD_POLICY'
   | 'FORBIDDEN'
   | 'POLICY_CHANGE_REJECTED'
-  | 'RECOVERY_REQUEST_INVALID';
+  | 'RECOVERY_REQUEST_INVALID'
+  | 'PASSKEY_INVALID'
+  | 'PASSKEY_REQUIRED';
 
 const STATUS: Record<AuthErrorCode, HttpStatus> = {
   INVALID_CREDENTIALS: HttpStatus.UNAUTHORIZED,
@@ -41,6 +43,8 @@ const STATUS: Record<AuthErrorCode, HttpStatus> = {
   FORBIDDEN: HttpStatus.FORBIDDEN,
   POLICY_CHANGE_REJECTED: HttpStatus.CONFLICT,
   RECOVERY_REQUEST_INVALID: HttpStatus.CONFLICT,
+  PASSKEY_INVALID: HttpStatus.UNAUTHORIZED,
+  PASSKEY_REQUIRED: HttpStatus.FORBIDDEN,
 };
 
 const MESSAGES: Partial<Record<AuthErrorCode, string>> = {
@@ -57,6 +61,8 @@ const MESSAGES: Partial<Record<AuthErrorCode, string>> = {
   CSRF_REJECTED: 'Request rejected',
   TOKEN_INVALID: 'This link is invalid or has expired',
   FORBIDDEN: 'Not permitted',
+  PASSKEY_INVALID: 'Passkey verification failed',
+  PASSKEY_REQUIRED: 'Your organization requires a passkey for administrator accounts',
 };
 
 /** Typed, non-leaking authentication error: `{ code, message, ...details }`. */

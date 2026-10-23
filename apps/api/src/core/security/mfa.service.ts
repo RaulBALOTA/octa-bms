@@ -44,18 +44,21 @@ export class MfaService {
   }
 
   async status(userId: string) {
-    const [authenticator, remaining, pending] = await Promise.all([
+    const [authenticator, remaining, pending, passkeys] = await Promise.all([
       this.activeAuthenticator(userId),
       this.recovery.remaining(userId),
       this.prisma.mfaEnrollment.count({ where: { userId, consumedAt: null, expiresAt: { gt: new Date() } } }),
+      this.prisma.webAuthnCredential.count({ where: { userId, revokedAt: null } }),
     ]);
     return {
-      enrolled: !!authenticator,
+      enrolled: !!authenticator || passkeys > 0,
+      totp: !!authenticator,
+      passkeys,
       type: authenticator?.type ?? null,
       label: authenticator?.label ?? null,
       enrolledAt: authenticator?.confirmedAt ?? null,
       lastUsedAt: authenticator?.lastUsedAt ?? null,
-      recoveryCodesRemaining: authenticator ? remaining : 0,
+      recoveryCodesRemaining: authenticator || passkeys ? remaining : 0,
       pendingEnrollment: pending > 0,
     };
   }
@@ -104,6 +107,7 @@ export class MfaService {
       const authenticatorId = randomUUID();
       const sealed = this.keys.encrypt(secret, seedAad(userId, authenticatorId));
       const now = new Date();
+      // recovery codes: a fresh batch on first factor or on replacing the authenticator
       await tx.mfaAuthenticator.create({
         data: { id: authenticatorId, userId, encryptedSeed: sealed.ciphertext, seedKeyId: sealed.keyId, confirmedAt: now, lastUsedStep: BigInt(step), lastUsedAt: now },
       });
@@ -133,9 +137,11 @@ export class MfaService {
     return count === 1;
   }
 
-  /** Removes all factors and recovery codes (disable, admin recovery). */
+  /** Removes all factors — TOTP and passkeys — and recovery codes (disable, admin recovery). */
   async removeAll(userId: string, db: Db = this.prisma): Promise<number> {
     const { count } = await db.mfaAuthenticator.updateMany({ where: { userId, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: new Date() } });
+    await db.webAuthnCredential.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    await db.webAuthnChallenge.updateMany({ where: { userId, consumedAt: null }, data: { consumedAt: new Date() } });
     await this.recovery.revokeAll(userId, db);
     await db.mfaEnrollment.updateMany({ where: { userId, consumedAt: null }, data: { consumedAt: new Date() } });
     await db.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaEnrolledAt: null } });

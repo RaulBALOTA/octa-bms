@@ -1,9 +1,11 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { MfaPolicyMode, Prisma } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { IsBoolean, IsDate, IsEmail, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 import { AccountTokensService } from '../security/account-tokens.service';
+import { AUTH_CONFIG, type AuthConfig } from '../security/auth-config';
+import { EmailNotificationService } from '../security/email-notification.service';
 import { AuthError } from '../security/auth-errors';
 import { AuthorizationService } from '../security/authorization.service';
 import { MfaRecoveryService } from '../security/mfa-recovery.service';
@@ -19,6 +21,9 @@ class PolicyDto {
   @IsOptional() @ValidateIf((_o, v) => v !== null) @Type(() => Date) @IsDate() enrollmentDeadline?: Date | null;
   @IsOptional() @ValidateIf((_o, v) => v !== null) @IsInt() @Min(5) @Max(1440) sessionIdleMinutes?: number | null;
   @IsOptional() @ValidateIf((_o, v) => v !== null) @IsInt() @Min(1) @Max(336) sessionAbsoluteHours?: number | null;
+  @IsOptional() @ValidateIf((_o, v) => v !== null) @IsInt() @Min(1) @Max(60) stepUpMaxAgeMinutes?: number | null;
+  @IsOptional() @IsBoolean() passkeysEnabled?: boolean;
+  @IsOptional() @IsBoolean() requirePasskeyForAdmins?: boolean;
 }
 class InvitationDto {
   @IsEmail() @MaxLength(254) email!: string;
@@ -56,6 +61,8 @@ export class AdminSecurityController {
     private readonly authorization: AuthorizationService,
     private readonly audit: SecurityAuditService,
     private readonly limits: RateLimitService,
+    private readonly email: EmailNotificationService,
+    @Inject(AUTH_CONFIG) private readonly config: AuthConfig,
   ) {}
 
   private scope(actor: AuthUser): Prisma.UserWhereInput {
@@ -68,16 +75,36 @@ export class AdminSecurityController {
   async overview(@CurrentUser() actor: AuthUser) {
     const scope = this.scope(actor);
     const now = new Date();
-    const [users, enrolled, pendingEnrollments, activeSessions, pendingRecovery, policy, enrolledAdmins] = await Promise.all([
+    const [users, enrolled, pendingEnrollments, activeSessions, pendingRecovery, policy, enrolledAdmins, passkeyCoverage] = await Promise.all([
       this.prisma.user.count({ where: { ...scope, isActive: true } }),
-      this.prisma.user.count({ where: { ...scope, isActive: true, mfaAuthenticators: { some: { status: 'ACTIVE' } } } }),
+      this.prisma.user.count({ where: { ...scope, isActive: true, OR: [{ mfaAuthenticators: { some: { status: 'ACTIVE' } } }, { webauthnCredentials: { some: { revokedAt: null } } }] } }),
       this.prisma.mfaEnrollment.count({ where: { consumedAt: null, expiresAt: { gt: now }, user: scope } }),
       this.prisma.authSession.count({ where: { revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now }, user: scope } }),
       this.prisma.mfaRecoveryRequest.count({ where: { status: { in: ['PENDING', 'APPROVED'] }, targetUser: scope } }),
       this.policy.get(),
       this.policy.enrolledAdminCount(),
+      this.policy.adminPasskeyCoverage(),
     ]);
-    return { users, enrolled, notEnrolled: users - enrolled, pendingEnrollments, activeSessions, pendingRecovery, policy, enrolledAdmins };
+    return {
+      users, enrolled, notEnrolled: users - enrolled, pendingEnrollments, activeSessions, pendingRecovery, policy, enrolledAdmins,
+      systemAdmins: passkeyCoverage.admins, adminsWithPasskey: passkeyCoverage.withPasskey,
+    };
+  }
+
+  /** Fixed (environment) settings shown read-only on the MFA configuration page. */
+  @Get('config')
+  @RequirePermission('identity.security.read')
+  configuration() {
+    const { mfa, session, webauthn, passwordMinLength, hibpEnabled, resetTokenTtlMinutes, invitationTtlHours } = this.config;
+    return {
+      totp: { issuer: mfa.issuer, algorithm: 'SHA1', digits: mfa.digits, periodSeconds: mfa.periodSeconds, windowSteps: mfa.window },
+      challenge: { preAuthTtlSeconds: mfa.preAuthTtlSeconds, enrollTtlSeconds: mfa.enrollTtlSeconds, maxAttempts: mfa.maxChallengeAttempts },
+      sessionDefaults: { idleMinutes: session.idleMinutes, absoluteHours: session.absoluteHours, stepUpMaxAgeMinutes: mfa.stepUpMaxAgeMinutes },
+      passkeys: { rpId: webauthn.rpId, rpName: webauthn.rpName, userVerification: 'required', attestation: 'none' },
+      passwords: { minLength: passwordMinLength, breachedCheck: hibpEnabled, resetTtlMinutes: resetTokenTtlMinutes, invitationTtlHours },
+      email: { configured: this.email.configured },
+      encryptionKey: { id: this.config.keys.current.id, development: this.config.keys.insecureDevKey },
+    };
   }
 
   @Get('users')
@@ -91,16 +118,19 @@ export class AdminSecurityController {
       select: {
         id: true, email: true, displayName: true, isActive: true, status: true, isSystemAdmin: true, lastLoginAt: true, mfaRequired: true, mfaEnrolledAt: true,
         mfaAuthenticators: { where: { status: 'ACTIVE' }, select: { confirmedAt: true, lastUsedAt: true } },
+        webauthnCredentials: { where: { revokedAt: null }, select: { lastUsedAt: true } },
         recoveryCodes: { where: { usedAt: null, revokedAt: null }, select: { id: true } },
         authSessions: { where: { revokedAt: null, idleExpiresAt: { gt: now }, absoluteExpiresAt: { gt: now } }, select: { id: true } },
       },
     });
     // never seeds, codes or hashes — status and counts only
-    return rows.map(({ mfaAuthenticators, recoveryCodes, authSessions, ...user }) => ({
+    return rows.map(({ mfaAuthenticators, webauthnCredentials, recoveryCodes, authSessions, ...user }) => ({
       ...user,
-      mfaEnrolled: mfaAuthenticators.length > 0,
+      mfaEnrolled: mfaAuthenticators.length > 0 || webauthnCredentials.length > 0,
+      totpEnrolled: mfaAuthenticators.length > 0,
+      passkeys: webauthnCredentials.length,
       mfaLastUsedAt: mfaAuthenticators[0]?.lastUsedAt ?? null,
-      recoveryCodesRemaining: mfaAuthenticators.length ? recoveryCodes.length : 0,
+      recoveryCodesRemaining: mfaAuthenticators.length || webauthnCredentials.length ? recoveryCodes.length : 0,
       activeSessions: authSessions.length,
     }));
   }

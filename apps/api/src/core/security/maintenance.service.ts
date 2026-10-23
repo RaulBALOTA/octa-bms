@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { AUTH_CONFIG, type AuthConfig } from './auth-config';
 import { MfaChallengeService } from './mfa-challenge.service';
 import { MfaService } from './mfa.service';
+import { PasskeyService } from './passkey.service';
 import { RateLimitService } from './rate-limit.service';
 import { SecurityAuditService } from './security-audit.service';
 import { SessionService } from './session.service';
@@ -18,6 +19,7 @@ export class SecurityMaintenanceService {
     private readonly sessions: SessionService,
     private readonly challenges: MfaChallengeService,
     private readonly mfa: MfaService,
+    private readonly passkeys: PasskeyService,
     private readonly limits: RateLimitService,
     private readonly audit: SecurityAuditService,
     @Inject(AUTH_CONFIG) private readonly config: AuthConfig,
@@ -29,6 +31,7 @@ export class SecurityMaintenanceService {
       rateLimits: await this.limits.purgeExpired(),
       challenges: await this.challenges.purgeExpired(),
       enrollments: await this.mfa.purgeExpiredEnrollments(),
+      webauthnChallenges: await this.passkeys.purgeExpiredChallenges(),
       sessions: await this.sessions.purgeExpired(30),
       tokens: (await this.prisma.oneTimeToken.deleteMany({ where: { expiresAt: { lt: new Date(Date.now() - 7 * 86_400_000) } } })).count,
       events: await this.audit.purgeOlderThan(this.config.securityEventRetentionDays),
