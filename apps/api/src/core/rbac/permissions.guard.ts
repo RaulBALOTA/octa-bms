@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { AuthUser, IS_PUBLIC_KEY, PERMISSIONS_KEY } from '../auth/decorators';
+import { AuthUser, IS_PUBLIC_KEY, PERMISSIONS_KEY, SYSTEM_ADMIN_KEY } from '../auth/decorators';
 import { RbacService } from './rbac.service';
 
 @Injectable()
@@ -39,6 +39,14 @@ export class PermissionsGuard implements CanActivate {
     if (!user.isSystemAdmin) {
       const granted = await this.rbac.getPermissions(user.id, user.companyId);
       user.permissions = [...granted];
+    }
+
+    const adminOnly = this.reflector.getAllAndOverride<boolean>(SYSTEM_ADMIN_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (adminOnly && !user.isSystemAdmin) {
+      throw new ForbiddenException('Requires a system administrator');
     }
 
     if (!required?.length || user.isSystemAdmin) return true;

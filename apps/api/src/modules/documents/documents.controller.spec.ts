@@ -40,8 +40,8 @@ function setup() {
   ];
   const tx = {
     folder: {
-      findMany: vi.fn(async (args?: { where: { deletedAt: null } }) => folders
-        .filter((row) => !args?.where || row.deletedAt === null)
+      findMany: vi.fn(async (args?: { where: { companyId?: string; deletedAt?: null } }) => folders
+        .filter((row) => args?.where?.deletedAt !== null || row.deletedAt === null)
         .map((row) => ({ ...row }))),
       update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<FolderRow> }) => {
         const folder = folders.find((row) => row.id === where.id)!;
@@ -77,7 +77,7 @@ function setup() {
 describe('folder movement', () => {
   it('moves the entire tree while preserving document links and unrelated folders', async () => {
     const { controller, prisma, documents, folder } = setup();
-    await controller.moveFolder('source', { parentId: 'destination' });
+    await controller.moveFolder('co-1', 'source', { parentId: 'destination' });
     expect(folder('source')).toMatchObject({ parentId: 'destination', path: '/Archive/Contracts' });
     expect(folder('child')).toMatchObject({ parentId: 'source', path: '/Archive/Contracts/2026' });
     expect(folder('grandchild').path).toBe('/Archive/Contracts/2026/Drafts');
@@ -91,7 +91,7 @@ describe('folder movement', () => {
 
   it('can move a nested folder to the top level', async () => {
     const { controller, folder } = setup();
-    await controller.moveFolder('child', { parentId: null });
+    await controller.moveFolder('co-1', 'child', { parentId: null });
     expect(folder('child')).toMatchObject({ parentId: null, path: '/2026' });
     expect(folder('grandchild').path).toBe('/2026/Drafts');
     expect(folder('source').path).toBe('/Contracts');
@@ -99,26 +99,26 @@ describe('folder movement', () => {
 
   it.each(['source', 'child', 'grandchild'])('rejects cyclic destination %s before changing anything', async (parentId) => {
     const { controller, tx } = setup();
-    await expect(controller.moveFolder('source', { parentId })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.moveFolder('co-1', 'source', { parentId })).rejects.toBeInstanceOf(BadRequestException);
     expect(tx.folder.update).not.toHaveBeenCalled();
   });
 
   it.each(['missing', 'deleted'])('rejects unavailable destination %s', async (parentId) => {
     const { controller, tx } = setup();
-    await expect(controller.moveFolder('source', { parentId })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller.moveFolder('co-1', 'source', { parentId })).rejects.toBeInstanceOf(NotFoundException);
     expect(tx.folder.update).not.toHaveBeenCalled();
   });
 
   it('rejects a name collision at the destination', async () => {
     const { controller, folders, tx } = setup();
     folders.push({ id: 'collision', name: 'Contracts', parentId: 'destination', path: '/Archive/Contracts', deletedAt: null });
-    await expect(controller.moveFolder('source', { parentId: 'destination' })).rejects.toBeInstanceOf(ConflictException);
+    await expect(controller.moveFolder('co-1', 'source', { parentId: 'destination' })).rejects.toBeInstanceOf(ConflictException);
     expect(tx.folder.update).not.toHaveBeenCalled();
   });
 
   it('leaves a folder unchanged when the destination is already its parent', async () => {
     const { controller, tx } = setup();
-    await controller.moveFolder('child', { parentId: 'source' });
+    await controller.moveFolder('co-1', 'child', { parentId: 'source' });
     expect(tx.folder.update).not.toHaveBeenCalled();
   });
 });
@@ -127,7 +127,7 @@ describe('recursive folder deletion', () => {
   it('soft deletes the whole subtree and its documents in one transaction', async () => {
     const { controller, folder, documents, prisma } = setup();
     const previouslyDeletedAt = documents[2].deletedAt;
-    await expect(controller.deleteFolder('source')).resolves.toEqual({
+    await expect(controller.deleteFolder('co-1', 'source')).resolves.toEqual({
       deleted: true, parentId: null, deletedFolderIds: ['source', 'child', 'grandchild'],
     });
     const deletedAt = folder('source').deletedAt;
@@ -146,7 +146,7 @@ describe('recursive folder deletion', () => {
 
   it('deletes a nested subtree while preserving its parent and documents outside it', async () => {
     const { controller, folder, documents } = setup();
-    await expect(controller.deleteFolder('child')).resolves.toEqual({
+    await expect(controller.deleteFolder('co-1', 'child')).resolves.toEqual({
       deleted: true, parentId: 'source', deletedFolderIds: ['child', 'grandchild'],
     });
     expect(folder('child').deletedAt).toBeInstanceOf(Date);
@@ -159,7 +159,7 @@ describe('recursive folder deletion', () => {
 
   it('deletes an empty folder', async () => {
     const { controller, folder, tx } = setup();
-    await controller.deleteFolder('unrelated');
+    await controller.deleteFolder('co-1', 'unrelated');
     expect(folder('unrelated').deletedAt).toBeInstanceOf(Date);
     expect(tx.folder.updateMany).toHaveBeenCalledOnce();
   });
@@ -167,7 +167,7 @@ describe('recursive folder deletion', () => {
   it('leaves similarly named folders outside the subtree untouched', async () => {
     const { controller, folders, folder } = setup();
     folders.push({ id: 'collision', name: '2026', parentId: null, path: '/2026', deletedAt: null });
-    await controller.deleteFolder('source');
+    await controller.deleteFolder('co-1', 'source');
     expect(folder('collision').deletedAt).toBeNull();
     expect(folder('child').deletedAt).toBeInstanceOf(Date);
   });
@@ -176,7 +176,7 @@ describe('recursive folder deletion', () => {
     const { controller, folder, documents } = setup();
     const previouslyDeletedAt = new Date('2026-01-01');
     folder('child').deletedAt = previouslyDeletedAt;
-    await controller.deleteFolder('source');
+    await controller.deleteFolder('co-1', 'source');
     expect(folder('child').deletedAt).toEqual(previouslyDeletedAt);
     expect(folder('grandchild').deletedAt).toBeInstanceOf(Date);
     expect(documents[1].deletedAt).toBeInstanceOf(Date);
@@ -184,7 +184,7 @@ describe('recursive folder deletion', () => {
 
   it.each(['missing', 'deleted'])('rejects deletion of unavailable folder %s', async (id) => {
     const { controller, tx } = setup();
-    await expect(controller.deleteFolder(id)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller.deleteFolder('co-1', id)).rejects.toBeInstanceOf(NotFoundException);
     expect(tx.folder.updateMany).not.toHaveBeenCalled();
     expect(tx.document.updateMany).not.toHaveBeenCalled();
   });

@@ -15,6 +15,7 @@ import {
   CompanyId,
   CurrentUser,
   RequirePermission,
+  SystemAdminOnly,
 } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiGatewayService } from '../ai/ai-gateway.service';
@@ -119,12 +120,16 @@ export class CommunicationController {
 
   @Post('email-templates')
   @RequirePermission('admin.settings.update')
+  // templates are shared by all companies of the group
+  @SystemAdminOnly()
   createTemplate(@Body() dto: UpsertTemplateDto) {
     return this.prisma.emailTemplate.create({ data: dto });
   }
 
   @Patch('email-templates/:id')
   @RequirePermission('admin.settings.update')
+  // templates are shared by all companies of the group
+  @SystemAdminOnly()
   updateTemplate(@Param('id') id: string, @Body() dto: UpdateTemplateDto) {
     return this.prisma.emailTemplate.update({ where: { id }, data: dto });
   }

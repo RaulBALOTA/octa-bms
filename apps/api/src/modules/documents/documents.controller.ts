@@ -25,6 +25,7 @@ import { extname, join } from 'path';
 import { ArrayMaxSize, ArrayNotEmpty, ArrayUnique, IsArray, IsDefined, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
 import {
   AuthUser,
+  CompanyId,
   CurrentUser,
   RequirePermission,
 } from '../../core/auth/decorators';
@@ -121,9 +122,9 @@ export class DocumentsController {
 
   @Get('folders')
   @RequirePermission('documents.folders.read')
-  folders() {
+  folders(@CompanyId() companyId: string) {
     return this.prisma.folder.findMany({
-      where: { deletedAt: null },
+      where: { companyId, deletedAt: null },
       include: {
         _count: {
           select: {
@@ -138,13 +139,14 @@ export class DocumentsController {
 
   @Post('folders')
   @RequirePermission('documents.folders.create')
-  async createFolder(@Body() dto: CreateFolderDto) {
+  async createFolder(@CompanyId() companyId: string, @Body() dto: CreateFolderDto) {
     const parent = dto.parentId
-      ? await this.prisma.folder.findFirst({ where: { id: dto.parentId, deletedAt: null } })
+      ? await this.prisma.folder.findFirst({ where: { id: dto.parentId, companyId, deletedAt: null } })
       : null;
     if (dto.parentId && !parent) throw new NotFoundException('Parent folder not found');
     return this.prisma.folder.create({
       data: {
+        companyId,
         name: dto.name,
         parentId: dto.parentId,
         path: `${parent?.path ?? ''}/${dto.name}`,
@@ -154,9 +156,14 @@ export class DocumentsController {
 
   @Patch('folders/:id')
   @RequirePermission('documents.folders.update')
-  async moveFolder(@Param('id') id: string, @Body() dto: MoveFolderDto) {
+  async moveFolder(
+    @CompanyId() companyId: string,
+    @Param('id') id: string,
+    @Body() dto: MoveFolderDto,
+  ) {
     return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.folder.findMany({ where: { deletedAt: null } });
+      // only this company's tree: folder, destination and name clashes all live in it
+      const rows = await tx.folder.findMany({ where: { companyId, deletedAt: null } });
       const folder = rows.find((row) => row.id === id);
       if (!folder) throw new NotFoundException('Folder not found');
       const parent = dto.parentId === null
@@ -190,10 +197,10 @@ export class DocumentsController {
 
   @Delete('folders/:id')
   @RequirePermission('documents.folders.delete')
-  async deleteFolder(@Param('id') id: string) {
+  async deleteFolder(@CompanyId() companyId: string, @Param('id') id: string) {
     return this.prisma.$transaction(async (tx) => {
       // Include previously deleted descendants so no live contents can be left behind.
-      const rows = await tx.folder.findMany();
+      const rows = await tx.folder.findMany({ where: { companyId } });
       const folder = rows.find((row) => row.id === id && row.deletedAt === null);
       if (!folder) throw new NotFoundException('Folder not found');
       const parent = rows.find((row) => row.id === folder.parentId && row.deletedAt === null);
@@ -201,7 +208,7 @@ export class DocumentsController {
       const deletedFolderIds = folderSubtree(rows, folder).map((row) => row.id);
       const deletedAt = new Date();
       await tx.document.updateMany({
-        where: { folderId: { in: deletedFolderIds }, deletedAt: null },
+        where: { folderId: { in: deletedFolderIds }, companyId, deletedAt: null },
         data: { deletedAt },
       });
       await tx.folder.updateMany({
@@ -216,19 +223,23 @@ export class DocumentsController {
 
   @Patch(':id/title')
   @RequirePermission('documents.documents.update')
-  async updateTitle(@Param('id') id: string, @Body() dto: UpdateDocumentTitleDto) {
+  async updateTitle(
+    @CompanyId() companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateDocumentTitleDto,
+  ) {
     const title = dto.title?.trim() || null;
     const result = await this.prisma.document.updateMany({
-      where: { id, deletedAt: null },
+      where: { id, companyId, deletedAt: null },
       data: { title },
     });
     if (!result.count) throw new NotFoundException('Document not found');
     return { id, title };
   }
 
-  private async assertDocumentsExist(tx: Prisma.TransactionClient, ids: string[]) {
+  private async assertDocumentsExist(tx: Prisma.TransactionClient, companyId: string, ids: string[]) {
     const documents = await tx.document.findMany({
-      where: { id: { in: ids }, deletedAt: null },
+      where: { id: { in: ids }, companyId, deletedAt: null },
       select: { id: true },
     });
     if (documents.length !== ids.length) {
@@ -238,15 +249,15 @@ export class DocumentsController {
 
   @Post('bulk-move')
   @RequirePermission('documents.documents.update')
-  async moveDocuments(@Body() dto: BulkMoveDocumentsDto) {
+  async moveDocuments(@CompanyId() companyId: string, @Body() dto: BulkMoveDocumentsDto) {
     return this.prisma.$transaction(async (tx) => {
-      await this.assertDocumentsExist(tx, dto.ids);
+      await this.assertDocumentsExist(tx, companyId, dto.ids);
       if (dto.folderId !== null) {
-        const folder = await tx.folder.findFirst({ where: { id: dto.folderId, deletedAt: null } });
+        const folder = await tx.folder.findFirst({ where: { id: dto.folderId, companyId, deletedAt: null } });
         if (!folder) throw new NotFoundException('Destination folder not found');
       }
       const result = await tx.document.updateMany({
-        where: { id: { in: dto.ids }, deletedAt: null },
+        where: { id: { in: dto.ids }, companyId, deletedAt: null },
         data: { folderId: dto.folderId },
       });
       return { moved: result.count };
@@ -255,11 +266,11 @@ export class DocumentsController {
 
   @Post('bulk-delete')
   @RequirePermission('documents.documents.delete')
-  async deleteDocuments(@Body() dto: BulkDocumentsDto) {
+  async deleteDocuments(@CompanyId() companyId: string, @Body() dto: BulkDocumentsDto) {
     return this.prisma.$transaction(async (tx) => {
-      await this.assertDocumentsExist(tx, dto.ids);
+      await this.assertDocumentsExist(tx, companyId, dto.ids);
       const result = await tx.document.updateMany({
-        where: { id: { in: dto.ids }, deletedAt: null },
+        where: { id: { in: dto.ids }, companyId, deletedAt: null },
         data: { deletedAt: new Date() },
       });
       return { deleted: result.count };
@@ -268,8 +279,9 @@ export class DocumentsController {
 
   @Get()
   @RequirePermission('documents.documents.read')
-  async list(@Query() query: ListDocumentsQuery) {
+  async list(@CompanyId() companyId: string, @Query() query: ListDocumentsQuery) {
     const where: Prisma.DocumentWhereInput = {
+      companyId,
       deletedAt: null,
       ...(query.folderId ? { folderId: query.folderId } : {}),
       ...(query.q
@@ -311,16 +323,17 @@ export class DocumentsController {
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
   async upload(
     @CurrentUser() user: AuthUser,
+    @CompanyId() companyId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body() body: { folderId?: string; documentId?: string },
   ) {
     if (!file) throw new NotFoundException('No file provided');
     if (body.folderId) {
-      const folder = await this.prisma.folder.findFirst({ where: { id: body.folderId, deletedAt: null } });
+      const folder = await this.prisma.folder.findFirst({ where: { id: body.folderId, companyId, deletedAt: null } });
       if (!folder) throw new NotFoundException('Folder not found');
     }
     if (body.documentId) {
-      const document = await this.prisma.document.findFirst({ where: { id: body.documentId, deletedAt: null } });
+      const document = await this.prisma.document.findFirst({ where: { id: body.documentId, companyId, deletedAt: null } });
       if (!document) throw new NotFoundException('Document not found');
     }
     if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -356,6 +369,7 @@ export class DocumentsController {
 
     return this.prisma.document.create({
       data: {
+        companyId,
         name: file.originalname,
         folderId: body.folderId || undefined,
         createdById: user.id,
@@ -377,19 +391,19 @@ export class DocumentsController {
 
   @Get(':id/download')
   @RequirePermission('documents.documents.read')
-  async download(@Param('id') id: string, @Res() res: Response) {
-    return this.streamDocument(id, res, false);
+  async download(@CompanyId() companyId: string, @Param('id') id: string, @Res() res: Response) {
+    return this.streamDocument(companyId, id, res, false);
   }
 
   @Get(':id/preview')
   @RequirePermission('documents.documents.read')
-  async preview(@Param('id') id: string, @Res() res: Response) {
-    return this.streamDocument(id, res, true);
+  async preview(@CompanyId() companyId: string, @Param('id') id: string, @Res() res: Response) {
+    return this.streamDocument(companyId, id, res, true);
   }
 
-  private async streamDocument(id: string, res: Response, inline: boolean) {
+  private async streamDocument(companyId: string, id: string, res: Response, inline: boolean) {
     const document = await this.prisma.document.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, companyId, deletedAt: null },
       include: { versions: { orderBy: { version: 'desc' }, take: 1 } },
     });
     const version = document?.versions[0];

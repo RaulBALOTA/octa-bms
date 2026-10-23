@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { BadRequestException, ConflictException, NotFoundException, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, ValidationPipe } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { OrganizationService } from './organization.service';
 import { CreateCompanyDto, CreateOfficeDto, UpdateCompanyDto, UpdateOfficeDto } from './organization.dto';
@@ -74,8 +74,18 @@ describe('company CRUD and hierarchy', () => {
     const { service } = setup();
     await expect(service.list(member)).resolves.toHaveLength(1);
     await expect(service.get(member, 'child')).rejects.toBeInstanceOf(NotFoundException);
-    await expect(service.update(member, 'child', { name: 'Forbidden' })).rejects.toBeInstanceOf(NotFoundException);
-    await expect(service.remove(member, 'child')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.update(member, 'child', { name: 'Forbidden' })).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.remove(member, 'child')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('only lets non-admins change the active company, where their permissions were checked', async () => {
+    const { service } = setup();
+    // a member of "child" whose admin permissions come from the active company "root"
+    const memberOfBoth: AuthUser = { ...member, companyId: 'root' };
+    await expect(service.update(memberOfBoth, 'child', { name: 'Elsewhere' })).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.createOffice(memberOfBoth, 'child', { code: 'X', name: 'X' } as any)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.updateOffice(memberOfBoth, 'child', 'office', { name: 'X' })).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.removeOffice(memberOfBoth, 'child', 'office')).rejects.toBeInstanceOf(ForbiddenException);
   });
   it('rejects deleting a holding company with subsidiaries', async () => {
     const { service, tx } = setup();

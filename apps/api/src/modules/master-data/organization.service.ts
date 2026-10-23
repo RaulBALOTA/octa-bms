@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthUser } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -31,6 +31,17 @@ export class OrganizationService {
     });
     if (!company) throw new NotFoundException('Company not found');
     return company;
+  }
+
+  /**
+   * Permissions are resolved for the active company (X-Company-Id), so a
+   * non-system admin may only change that company and its offices; being a
+   * plain member of another company does not grant admin rights there.
+   */
+  private assertActiveCompany(user: AuthUser, companyId: string) {
+    if (!user.isSystemAdmin && user.companyId !== companyId) {
+      throw new ForbiddenException('Switch to this company to change it');
+    }
   }
 
   private async transaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
@@ -76,6 +87,7 @@ export class OrganizationService {
 
   update(user: AuthUser, id: string, dto: UpdateCompanyDto) {
     return this.transaction(async (tx) => {
+      this.assertActiveCompany(user, id);
       await this.get(user, id, tx);
       await this.companyReferences(tx, user, dto, id);
       return tx.company.update({ where: { id }, data: dto });
@@ -84,6 +96,7 @@ export class OrganizationService {
 
   remove(user: AuthUser, id: string) {
     return this.transaction(async (tx) => {
+      this.assertActiveCompany(user, id);
       await this.get(user, id, tx);
       if (await tx.company.count({ where: { parentCompanyId: id, deletedAt: null } })) throw new ConflictException('Company has subsidiaries. Reassign or delete them first.');
       const company = await tx.company.findUniqueOrThrow({ where: { id }, include: { _count: { select: {
@@ -118,6 +131,7 @@ export class OrganizationService {
 
   createOffice(user: AuthUser, companyId: string, dto: CreateOfficeDto) {
     return this.transaction(async (tx) => {
+      this.assertActiveCompany(user, companyId);
       await this.get(user, companyId, tx);
       await this.officeReferences(tx, companyId, dto);
       return tx.office.create({ data: { ...dto, companyId } });
@@ -126,6 +140,7 @@ export class OrganizationService {
 
   updateOffice(user: AuthUser, companyId: string, id: string, dto: UpdateOfficeDto) {
     return this.transaction(async (tx) => {
+      this.assertActiveCompany(user, companyId);
       await this.getOffice(user, companyId, id, tx);
       await this.officeReferences(tx, companyId, dto, id);
       return tx.office.update({ where: { id }, data: dto });
@@ -134,6 +149,7 @@ export class OrganizationService {
 
   removeOffice(user: AuthUser, companyId: string, id: string) {
     return this.transaction(async (tx) => {
+      this.assertActiveCompany(user, companyId);
       await this.getOffice(user, companyId, id, tx);
       const employees = await tx.employee.count({ where: { officeId: id, deletedAt: null } });
       const roles = await tx.userRole.count({ where: { officeId: id } });

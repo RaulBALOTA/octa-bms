@@ -15,6 +15,14 @@ export const PERMISSIONS_KEY = 'requiredPermissions';
 export const RequirePermission = (...codes: string[]) =>
   SetMetadata(PERMISSIONS_KEY, codes);
 
+export const SYSTEM_ADMIN_KEY = 'systemAdminOnly';
+/**
+ * Restricts an endpoint to system administrators, on top of any permission
+ * codes. For group-wide catalogs (roles, email templates) whose changes apply
+ * to every company, so a company-scoped admin must not edit them.
+ */
+export const SystemAdminOnly = () => SetMetadata(SYSTEM_ADMIN_KEY, true);
+
 export interface AuthUser {
   id: string;
   email: string;

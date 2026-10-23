@@ -13,6 +13,7 @@ import {
   AuthUser,
   CurrentUser,
   RequirePermission,
+  SystemAdminOnly,
 } from '../../core/auth/decorators';
 import { RbacService } from '../../core/rbac/rbac.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -60,6 +61,8 @@ export class RolesController {
 
   @Post()
   @RequirePermission('identity.roles.create')
+  // roles are global: a new role and its permission set apply in every company
+  @SystemAdminOnly()
   async create(@Body() dto: CreateRoleDto) {
     const permissions = await this.prisma.permission.findMany({
       where: { code: { in: dto.permissionCodes } },

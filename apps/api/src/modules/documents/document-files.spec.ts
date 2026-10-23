@@ -34,7 +34,7 @@ function setup() {
 describe('bulk file operations', () => {
   it.each(['target', null])('moves the selected files to %s and leaves other files unchanged', async (folderId) => {
     const { controller, documents } = setup();
-    await expect(controller.moveDocuments({ ids: ['a', 'b'], folderId })).resolves.toEqual({ moved: 2 });
+    await expect(controller.moveDocuments('co-1', { ids: ['a', 'b'], folderId })).resolves.toEqual({ moved: 2 });
     expect(documents.slice(0, 2).map((row) => row.folderId)).toEqual([folderId, folderId]);
     expect(documents[2].folderId).toBe('source');
     expect(documents[3].folderId).toBe('source');
@@ -42,7 +42,7 @@ describe('bulk file operations', () => {
 
   it('soft deletes only selected files', async () => {
     const { controller, documents } = setup();
-    await expect(controller.deleteDocuments({ ids: ['a', 'b'] })).resolves.toEqual({ deleted: 2 });
+    await expect(controller.deleteDocuments('co-1', { ids: ['a', 'b'] })).resolves.toEqual({ deleted: 2 });
     expect(documents[0].deletedAt).toBeInstanceOf(Date);
     expect(documents[1].deletedAt).toEqual(documents[0].deletedAt);
     expect(documents[2].deletedAt).toBeNull();
@@ -50,14 +50,14 @@ describe('bulk file operations', () => {
 
   it.each(['missing', 'deleted'])('rejects an unavailable target folder %s before moving any files', async (folderId) => {
     const { controller, tx } = setup();
-    await expect(controller.moveDocuments({ ids: ['a', 'b'], folderId })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller.moveDocuments('co-1', { ids: ['a', 'b'], folderId })).rejects.toBeInstanceOf(NotFoundException);
     expect(tx.document.updateMany).not.toHaveBeenCalled();
   });
 
   it.each(['moveDocuments', 'deleteDocuments'] as const)('rejects the whole %s batch when one file is missing or deleted', async (method) => {
     for (const id of ['missing', 'deleted']) {
       const { controller, tx } = setup();
-      await expect(controller[method]({ ids: ['a', id], folderId: 'target' })).rejects.toBeInstanceOf(NotFoundException);
+      await expect(controller[method]('co-1', { ids: ['a', id], folderId: 'target' })).rejects.toBeInstanceOf(NotFoundException);
       expect(tx.document.updateMany).not.toHaveBeenCalled();
     }
   });
@@ -87,17 +87,17 @@ describe('optional document titles', () => {
       return { count: 1 };
     });
     const controller = new DocumentsController({ document: { updateMany } } as unknown as PrismaService);
-    await controller.updateTitle('file', { title });
+    await controller.updateTitle('co-1', 'file', { title });
     expect(document).toEqual({
       id: 'file', name: 'drawing.pdf', title: title?.trim() || null, currentVersion: 1,
       versions: [{ fileName: 'drawing.pdf', storageKey: 'original-storage-key', checksum: 'original-checksum' }],
     });
-    expect(updateMany).toHaveBeenCalledWith({ where: { id: 'file', deletedAt: null }, data: { title: title?.trim() || null } });
+    expect(updateMany).toHaveBeenCalledWith({ where: { id: 'file', companyId: 'co-1', deletedAt: null }, data: { title: title?.trim() || null } });
   });
 
   it('does not edit missing or deleted files', async () => {
     const controller = new DocumentsController({ document: { updateMany: vi.fn(async () => ({ count: 0 })) } } as unknown as PrismaService);
-    await expect(controller.updateTitle('missing', { title: 'New title' })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller.updateTitle('co-1', 'missing', { title: 'New title' })).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it.each([{ title: 'x'.repeat(251) }, { title: 123 }, {}, { title: 'New title', name: 'renamed.pdf' }])('rejects invalid metadata or filename changes %j', async (body) => {
@@ -134,7 +134,7 @@ describe('authenticated document streaming', () => {
     const chunks: Buffer[] = [];
     response.on('data', (chunk) => chunks.push(chunk));
     const ended = new Promise<void>((resolve) => response.on('end', resolve));
-    await controller.preview('file', response as unknown as Response);
+    await controller.preview('co-1', 'file', response as unknown as Response);
     await ended;
     expect(Buffer.concat(chunks).toString()).toBe('fixture bytes');
     expect(response.setHeader).toHaveBeenCalledWith('Content-Type', mimeType);
@@ -144,11 +144,11 @@ describe('authenticated document streaming', () => {
 
   it('refuses to preview arbitrary HTML', async () => {
     const controller = controllerFor('unsafe.html', 'text/html');
-    await expect(controller.preview('file', {} as Response)).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+    await expect(controller.preview('co-1', 'file', {} as Response)).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
   });
 
   it.each(['preview', 'download'] as const)('does not allow %s of a deleted file', async (method) => {
     const controller = controllerFor('scan.pdf', 'application/pdf', true);
-    await expect(controller[method]('deleted', {} as Response)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller[method]('co-1', 'deleted', {} as Response)).rejects.toBeInstanceOf(NotFoundException);
   });
 });

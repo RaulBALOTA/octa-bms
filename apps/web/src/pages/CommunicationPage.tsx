@@ -790,17 +790,20 @@ function TemplatesTab() {
 
   return (
     <>
-      <div className="mb-3 flex justify-end">
-        <Button
-          onClick={() => {
-            setEditing(null);
-            setEditorOpen(true);
-          }}
-        >
-          <Plus size={14} />
-          {t('common.new')}
-        </Button>
-      </div>
+      {/* templates are shared by the whole group: only system admins edit them */}
+      {me?.isSystemAdmin && (
+        <div className="mb-3 flex justify-end">
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setEditorOpen(true);
+            }}
+          >
+            <Plus size={14} />
+            {t('common.new')}
+          </Button>
+        </div>
+      )}
       {isLoading ? (
         <Skeleton className="h-40" />
       ) : templates?.length ? (
@@ -827,17 +830,19 @@ function TemplatesTab() {
                   {t('comm.sendMail')}
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setEditing(template);
-                  setEditorOpen(true);
-                }}
-                aria-label={t('data.editNamed', { name: template.name })}
-              >
-                <Pencil size={13} />
-              </Button>
+              {me?.isSystemAdmin && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setEditing(template);
+                    setEditorOpen(true);
+                  }}
+                  aria-label={t('data.editNamed', { name: template.name })}
+                >
+                  <Pencil size={13} />
+                </Button>
+              )}
             </li>
           ))}
         </ul>

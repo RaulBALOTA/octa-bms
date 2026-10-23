@@ -384,6 +384,7 @@ export class ContractItemsController {
       writeFileSync(join(UPLOAD_DIR, storageKey), file.buffer);
       const document = await this.prisma.document.create({
         data: {
+          companyId,
           name: file.originalname,
           entityType: 'contract',
           entityId: contractId,

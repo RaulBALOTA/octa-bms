@@ -16,7 +16,8 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
-import { RequirePermission } from '../../core/auth/decorators';
+import { CompanyId, RequirePermission } from '../../core/auth/decorators';
+import { assertReferenceInCompany, inCompany, requireInCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
 
@@ -68,8 +69,9 @@ export class LegalController {
 
   @Get('compliance-items')
   @RequirePermission('legal.compliance.read')
-  async compliance(@Query() query: PageQueryDto) {
+  async compliance(@CompanyId() companyId: string, @Query() query: PageQueryDto) {
     const where: Prisma.ComplianceItemWhereInput = {
+      companyId,
       deletedAt: null,
       ...(query.q
         ? {
@@ -94,15 +96,23 @@ export class LegalController {
 
   @Post('compliance-items')
   @RequirePermission('legal.compliance.create')
-  createCompliance(@Body() dto: UpsertComplianceDto) {
+  createCompliance(@CompanyId() companyId: string, @Body() dto: UpsertComplianceDto) {
     return this.prisma.complianceItem.create({
-      data: { ...dto, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined },
+      data: { ...dto, companyId, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined },
     });
   }
 
   @Patch('compliance-items/:id')
   @RequirePermission('legal.compliance.update')
-  updateCompliance(@Param('id') id: string, @Body() dto: UpdateComplianceDto) {
+  async updateCompliance(
+    @CompanyId() companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateComplianceDto,
+  ) {
+    await requireInCompany(
+      this.prisma.complianceItem.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } }),
+      'Compliance item',
+    );
     return this.prisma.complianceItem.update({
       where: { id },
       data: {
@@ -117,8 +127,9 @@ export class LegalController {
 
   @Get('cases')
   @RequirePermission('legal.cases.read')
-  async cases(@Query() query: PageQueryDto) {
+  async cases(@CompanyId() companyId: string, @Query() query: PageQueryDto) {
     const where: Prisma.LegalCaseWhereInput = {
+      companyId,
       deletedAt: null,
       ...(query.q
         ? {
@@ -144,15 +155,25 @@ export class LegalController {
 
   @Post('cases')
   @RequirePermission('legal.cases.create')
-  createCase(@Body() dto: UpsertCaseDto) {
+  async createCase(@CompanyId() companyId: string, @Body() dto: UpsertCaseDto) {
+    await assertReferenceInCompany(dto.partnerId, 'partnerId', inCompany(this.prisma, 'businessPartner', companyId));
     return this.prisma.legalCase.create({
-      data: { ...dto, openedDate: new Date() },
+      data: { ...dto, companyId, openedDate: new Date() },
     });
   }
 
   @Patch('cases/:id')
   @RequirePermission('legal.cases.update')
-  updateCase(@Param('id') id: string, @Body() dto: UpdateCaseDto) {
+  async updateCase(
+    @CompanyId() companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateCaseDto,
+  ) {
+    await requireInCompany(
+      this.prisma.legalCase.findFirst({ where: { id, companyId, deletedAt: null }, select: { id: true } }),
+      'Legal case',
+    );
+    await assertReferenceInCompany(dto.partnerId, 'partnerId', inCompany(this.prisma, 'businessPartner', companyId));
     return this.prisma.legalCase.update({
       where: { id },
       data: {

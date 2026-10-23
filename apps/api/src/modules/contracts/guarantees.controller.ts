@@ -119,18 +119,19 @@ export class GuaranteesController {
 
   @Get('insurance')
   @RequirePermission('contracts.insurance.read')
-  insurance() {
+  insurance(@CompanyId() companyId: string) {
     return this.prisma.insurancePolicy.findMany({
-      where: { deletedAt: null },
+      where: { companyId, deletedAt: null },
       orderBy: { endDate: 'asc' },
     });
   }
 
   @Post('insurance')
   @RequirePermission('contracts.insurance.create')
-  createInsurance(@Body() dto: CreateInsuranceDto) {
+  createInsurance(@CompanyId() companyId: string, @Body() dto: CreateInsuranceDto) {
     return this.prisma.insurancePolicy.create({
       data: {
+        companyId,
         policyNumber: dto.policyNumber,
         type: dto.type,
         insurer: dto.insurer,

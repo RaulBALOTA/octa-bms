@@ -411,6 +411,14 @@ model Company {
   positionPlans    PositionPlan[]
   orgChartVersions OrgChartVersion[]
   staffingBudgets  StaffingBudgetScenario[]
+  folders          Folder[]
+  documents        Document[]
+  legalCases       LegalCase[]
+  complianceItems  ComplianceItem[]
+  dataProcessingActivities DataProcessingActivity[]
+  whistleblowerReports     WhistleblowerReport[]
+  professionalLicenses     ProfessionalLicense[]
+  insurancePolicies        InsurancePolicy[]
 
   @@map("companies")
 }
@@ -1229,6 +1237,7 @@ model BankGuarantee {
 
 model InsurancePolicy {
   id            String    @id @default(cuid())
+  companyId      String? // owning company; null only for unattributed legacy rows
   policyNumber  String
   type          String // PROFESSIONAL_LIABILITY | PUBLIC_LIABILITY | D_AND_O | CYBER | PROPERTY | VEHICLE
   insurer       String
@@ -1244,6 +1253,9 @@ model InsurancePolicy {
   deletedAt DateTime?
 
   @@index([endDate])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@map("insurance_policies")
 }
 
@@ -1853,6 +1865,7 @@ model Interview {
 
 model LegalCase {
   id          String    @id @default(cuid())
+  companyId      String? // owning company; null only for unattributed legacy rows
   caseNumber  String    @unique
   title       String
   type        String // LITIGATION | ARBITRATION | ADMINISTRATIVE | EMPLOYMENT | IP
@@ -1871,11 +1884,15 @@ model LegalCase {
 
   partner BusinessPartner? @relation(fields: [partnerId], references: [id])
 
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@map("legal_cases")
 }
 
 model ComplianceItem {
   id           String    @id @default(cuid())
+  companyId      String? // owning company; null only for unattributed legacy rows
   category     String // GDPR | ISO_9001 | ISO_14001 | ISO_45001 | LICENSE | REGISTER | TAX | OTHER
   title        String
   description  String?
@@ -1891,11 +1908,15 @@ model ComplianceItem {
   deletedAt DateTime?
 
   @@index([dueDate, status])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@map("compliance_items")
 }
 
 model DataProcessingActivity {
   id             String  @id @default(cuid())
+  companyId      String? // owning company; null only for unattributed legacy rows
   name           String // Verarbeitungsverzeichnis Art. 30 DSGVO
   purpose        String
   legalBasis     String // Art. 6(1)(a)-(f)
@@ -1910,11 +1931,15 @@ model DataProcessingActivity {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@map("data_processing_activities")
 }
 
 model WhistleblowerReport {
   id          String   @id @default(cuid())
+  companyId      String? // owning company; null only for unattributed legacy rows
   referenceCode String @unique // anonymous access code
   category    String
   description String
@@ -1924,11 +1949,15 @@ model WhistleblowerReport {
   closedAt    DateTime?
   resolution  String?
 
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@map("whistleblower_reports")
 }
 
 model ProfessionalLicense {
   id         String    @id @default(cuid())
+  companyId      String? // owning company; null only for unattributed legacy rows
   holderType String // COMPANY | EMPLOYEE
   holderId   String
   name       String // e.g. "Beratender Ingenieur (Ingenieurkammer Bayern)"
@@ -1942,6 +1971,9 @@ model ProfessionalLicense {
   deletedAt DateTime?
 
   @@index([expiryDate])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@map("professional_licenses")
 }
 
@@ -2248,13 +2280,16 @@ model Folder {
   parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id])
   children  Folder[]   @relation("FolderTree")
   documents Document[]
+  company   Company?   @relation(fields: [companyId], references: [id])
 
   @@index([path])
+  @@index([companyId])
   @@map("folders")
 }
 
 model Document {
   id             String    @id @default(cuid())
+  companyId      String? // owning company; null only for unattributed legacy rows
   folderId       String?
   documentTypeId String?
   name           String
@@ -2279,6 +2314,9 @@ model Document {
 
   @@index([entityType, entityId])
   @@index([folderId])
+  company Company? @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@map("documents")
 }
 
