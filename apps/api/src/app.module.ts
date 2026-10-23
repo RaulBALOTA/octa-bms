@@ -33,6 +33,9 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { CommunicationModule } from './modules/communication/communication.module';
 import { BiModule } from './modules/bi/bi.module';
+import { AiModule } from './modules/ai/ai.module';
+import { RecordsModule } from './modules/records/records.module';
+import { CalendarModule } from './modules/business-calendar/calendar.module';
 
 @Module({
   imports: [
@@ -72,6 +75,9 @@ import { BiModule } from './modules/bi/bi.module';
     DocumentsModule,
     CommunicationModule,
     BiModule,
+    AiModule,
+    RecordsModule,
+    CalendarModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Wallet } from 'lucide-react';
+import { Loader2, Plus, Printer, Sparkles, Trash2, Wallet } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Paged } from '../lib/api';
+import { AiSummary } from '../components/ai';
+import { printInvoice } from '../lib/print-invoice';
 import { Column, ListPage, StatusBadge } from '../components/ListPage';
+import { FinanceNav } from '../components/FinanceNav';
 import {
   Button,
   Dialog,
@@ -12,9 +15,11 @@ import {
   KeyValue,
   SelectInput,
   Skeleton,
+  TextArea,
   TextInput,
   useToast,
 } from '../components/ui';
+import { useAiStatus } from '../components/ai';
 
 interface Invoice {
   id: string;
@@ -64,6 +69,13 @@ function InvoiceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { data: invoice } = useQuery({
     queryKey: ['invoice', id],
     queryFn: () => api.get<InvoiceDetail>(`/finance/invoices/${id}`),
+  });
+
+  const { data: company } = useQuery({
+    queryKey: ['company-profile'],
+    queryFn: () =>
+      api.get<Parameters<typeof printInvoice>[1]>('/master/company-profile'),
+    staleTime: 300_000,
   });
 
   const transition = useMutation({
@@ -117,6 +129,22 @@ function InvoiceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                   <StatusBadge value={invoice.status} />
                 </div>
               </div>
+              {invoice.direction === 'OUTGOING' && company && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    printInvoice(
+                      invoice as unknown as Parameters<typeof printInvoice>[0],
+                      company,
+                      i18n.language,
+                    )
+                  }
+                >
+                  <Printer size={13} />
+                  {t('finance.print')}
+                </Button>
+              )}
             </div>
             {(NEXT_STATES[invoice.status] ?? []).length > 0 && (
               <div className="mt-3 flex gap-2">
@@ -133,6 +161,7 @@ function InvoiceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 ))}
               </div>
             )}
+            <AiSummary entityType="invoice" entityId={id} />
           </div>
 
           <div className="flex-1 space-y-5 overflow-y-auto p-5">
@@ -230,6 +259,18 @@ interface LineDraft {
   unit: string;
   unitPrice: string;
   taxCodeId: string;
+  budgetCategory: string;
+}
+
+interface BudgetCatalog {
+  groups: { code: string; type: string; nameDe: string; nameEn: string }[];
+  categories: {
+    code: string;
+    group: string;
+    type: string;
+    nameDe: string;
+    nameEn: string;
+  }[];
 }
 
 function NewInvoiceDialog({
@@ -261,8 +302,12 @@ function NewInvoiceDialog({
     unit: 'h',
     unitPrice: '',
     taxCodeId,
+    budgetCategory: '',
   });
   const [lines, setLines] = useState<LineDraft[]>([emptyLine()]);
+  const [aiText, setAiText] = useState('');
+  const [aiOpen, setAiOpen] = useState(false);
+  const { data: aiStatus } = useAiStatus();
 
   const { data: partners } = useQuery({
     queryKey: ['partners-for-invoice', direction],
@@ -280,6 +325,24 @@ function NewInvoiceDialog({
     queryFn: () => api.get<TaxCode[]>('/master/tax-codes'),
     enabled: open,
   });
+
+  const isIncoming = direction === 'INCOMING';
+  const { data: catalog } = useQuery({
+    queryKey: ['budget-categories'],
+    queryFn: () => api.get<BudgetCatalog>('/finance/budgets/categories'),
+    enabled: open && isIncoming,
+    staleTime: 300_000,
+  });
+  const isGerman = i18n.language.startsWith('de');
+  const catName = (c: { nameDe: string; nameEn: string }) =>
+    isGerman ? c.nameDe : c.nameEn;
+  const expenseGroups =
+    catalog?.groups
+      .filter((g) => g.type === 'EXPENSE')
+      .map((g) => ({
+        ...g,
+        categories: catalog.categories.filter((c) => c.group === g.code),
+      })) ?? [];
 
   const defaultTax = taxCodes?.find((tc) => tc.code === 'DE-19')?.id ?? '';
 
@@ -306,6 +369,63 @@ function NewInvoiceDialog({
     lines.length > 0 &&
     lines.every((l) => l.description.trim() && Number(l.quantity) > 0 && l.unitPrice !== '');
 
+  interface ExtractedInvoice {
+    partnerName: string;
+    externalNumber: string | null;
+    invoiceDate: string;
+    serviceDate: string | null;
+    dueDate: string;
+    lines: {
+      description: string;
+      quantity: number;
+      unit: string;
+      unitPrice: number;
+      vatRate: number;
+    }[];
+  }
+
+  const extract = useMutation({
+    mutationFn: () =>
+      api.post<ExtractedInvoice>('/ai/extract-invoice', { text: aiText }),
+    onSuccess: (data) => {
+      // match partner by name; tax code by VAT rate
+      const partnerMatch = partners?.data.find(
+        (p) =>
+          p.name.toLowerCase().includes(data.partnerName.toLowerCase()) ||
+          data.partnerName.toLowerCase().includes(p.name.toLowerCase()),
+      );
+      const taxByRate = (rate: number) =>
+        taxCodes?.find((tc) => Number(tc.ratePercent) === rate)?.id ?? defaultTax;
+
+      setHead((h) => ({
+        ...h,
+        partnerId: partnerMatch?.id ?? h.partnerId,
+        invoiceDate: data.invoiceDate || h.invoiceDate,
+        serviceDate: data.serviceDate ?? h.serviceDate,
+        dueDate: data.dueDate || h.dueDate,
+        reference: data.externalNumber ?? h.reference,
+      }));
+      setLines(
+        data.lines.map((line) => ({
+          description: line.description,
+          quantity: String(line.quantity),
+          unit: ['h', 'day', 'pcs', 'LS'].includes(line.unit) ? line.unit : 'pcs',
+          unitPrice: line.unitPrice.toFixed(2),
+          taxCodeId: taxByRate(line.vatRate),
+          budgetCategory: '',
+        })),
+      );
+      setAiOpen(false);
+      setAiText('');
+      toast(
+        partnerMatch
+          ? t('ai.extracted')
+          : `${t('ai.extracted')} — ${t('ai.partnerNotFound', { name: data.partnerName })}`,
+      );
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   const create = useMutation({
     mutationFn: () =>
       api.post<{ invoiceNumber: string }>('/finance/invoices', {
@@ -321,6 +441,8 @@ function NewInvoiceDialog({
           unit: l.unit,
           unitPrice: l.unitPrice,
           taxCodeId: l.taxCodeId || defaultTax,
+          budgetCategory:
+            isIncoming && l.budgetCategory ? l.budgetCategory : undefined,
         })),
       }),
     onSuccess: (created) => {
@@ -336,6 +458,43 @@ function NewInvoiceDialog({
 
   return (
     <Dialog open={open} onClose={onClose} title={t('finance.newInvoice')} width="max-w-3xl">
+      {aiStatus?.enabled && (
+        <div className="mb-3">
+          {!aiOpen ? (
+            <Button size="sm" variant="secondary" onClick={() => setAiOpen(true)}>
+              <Sparkles size={13} className="text-primary" />
+              {t('ai.extractInvoice')}
+            </Button>
+          ) : (
+            <div className="rounded-lg border border-primary/30 bg-accent/30 p-3">
+              <TextArea
+                rows={5}
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                placeholder={t('ai.extractPlaceholder')}
+                className="font-mono !text-xs"
+              />
+              <div className="mt-2 flex justify-end gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setAiOpen(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={extract.isPending || aiText.trim().length < 20}
+                  onClick={() => extract.mutate()}
+                >
+                  {extract.isPending ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  {t('ai.extract')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <form
         className="space-y-4"
         onSubmit={(e: FormEvent) => {
@@ -462,6 +621,24 @@ function NewInvoiceDialog({
                 >
                   <Trash2 size={14} />
                 </button>
+                {isIncoming && (
+                  <SelectInput
+                    className="col-span-5 !text-xs"
+                    value={line.budgetCategory}
+                    onChange={(e) => setLine(index, { budgetCategory: e.target.value })}
+                  >
+                    <option value="">{t('finance.kostenart')}: —</option>
+                    {expenseGroups.map((g) => (
+                      <optgroup key={g.code} label={catName(g)}>
+                        {g.categories.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {catName(c)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </SelectInput>
+                )}
               </div>
             ))}
           </div>
@@ -528,6 +705,7 @@ export function InvoicesPage() {
 
   return (
     <>
+      <FinanceNav />
       <ListPage<Invoice>
         title={t('finance.title')}
         endpoint="/finance/invoices"

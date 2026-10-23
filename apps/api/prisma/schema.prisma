@@ -17,6 +17,144 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum CalendarDomain {
+  CORPORATE
+  FINANCE
+  SALES
+  HR
+  OPERATIONS
+  MEETING
+  COMMITMENT
+}
+
+enum CalendarKind {
+  APPOINTMENT
+  DEADLINE
+  OBLIGATION
+  MILESTONE
+  DECISION
+  FORECAST
+  FOLLOW_UP
+}
+
+enum CalendarStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  AWAITING
+  AT_RISK
+  COMPLETED
+  CANCELED
+}
+
+enum CalendarSensitivity {
+  PUBLIC_INTERNAL
+  TEAM
+  RESTRICTED
+  PRIVATE
+}
+
+model BusinessCalendarItem {
+  id String @id @default(cuid())
+  companyId String
+  title String
+  description String?
+  domain CalendarDomain
+  kind CalendarKind
+  status CalendarStatus @default(OPEN)
+  sensitivity CalendarSensitivity @default(PUBLIC_INTERNAL)
+  priority Int @default(1)
+  ownerUserId String?
+  createdById String
+  timezoneIana String @default("Europe/Berlin")
+  allDay Boolean @default(false)
+  dateOnly String?
+  endDateOnly String?
+  startsAt DateTime?
+  endsAt DateTime?
+  hardDueDate String?
+  internalTargetDate String?
+  forecastDate String?
+  hardDueAt DateTime?
+  completionEvidenceRequired Boolean @default(false)
+  completedAt DateTime?
+  completedById String?
+  sourceKind String @default("MANUAL")
+  sourceUrl String?
+  businessEntityType String?
+  businessEntityId String?
+  recurrenceFrequency String?
+  recurrenceInterval Int @default(1)
+  recurrenceUntil String?
+  recurrenceAnchor String?
+  recurrenceSeriesId String?
+  originalOccurrenceKey String?
+  occurrenceNumber Int @default(0)
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  company Company @relation(fields: [companyId], references: [id])
+  owner User? @relation("CalendarOwner", fields: [ownerUserId], references: [id])
+  checklist BusinessCalendarChecklistItem[]
+  evidence BusinessCalendarEvidence[]
+  grants BusinessCalendarAccessGrant[]
+  history BusinessCalendarHistory[]
+  @@unique([companyId, recurrenceSeriesId, originalOccurrenceKey])
+  @@index([companyId, domain, status])
+  @@index([companyId, ownerUserId])
+  @@index([companyId, dateOnly])
+  @@index([companyId, hardDueDate])
+  @@index([companyId, startsAt])
+  @@index([companyId, hardDueAt])
+  @@map("business_calendar_items")
+}
+
+model BusinessCalendarChecklistItem {
+  id String @id @default(cuid())
+  itemId String
+  title String
+  done Boolean @default(false)
+  item BusinessCalendarItem @relation(fields: [itemId], references: [id])
+  @@index([itemId])
+  @@map("business_calendar_checklist_items")
+}
+
+model BusinessCalendarEvidence {
+  id String @id @default(cuid())
+  itemId String
+  title String
+  url String
+  createdById String
+  createdAt DateTime @default(now())
+  item BusinessCalendarItem @relation(fields: [itemId], references: [id])
+  @@index([itemId])
+  @@map("business_calendar_evidence")
+}
+
+model BusinessCalendarAccessGrant {
+  id String @id @default(cuid())
+  itemId String
+  userId String
+  canEdit Boolean @default(false)
+  item BusinessCalendarItem @relation(fields: [itemId], references: [id])
+  @@unique([itemId, userId])
+  @@map("business_calendar_access_grants")
+}
+
+model BusinessCalendarHistory {
+  id String @id @default(cuid())
+  itemId String
+  actorId String
+  action String
+  version Int
+  changes Json
+  createdAt DateTime @default(now())
+  item BusinessCalendarItem @relation(fields: [itemId], references: [id])
+  @@index([itemId, createdAt])
+  @@map("business_calendar_history")
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -66,6 +204,12 @@ model User {
   assignedTasks   Task[]              @relation("TaskAssignee")
   createdTasks    Task[]              @relation("TaskCreator")
   approvalActions ApprovalAction[]
+  sentMessages     DirectMessage[]    @relation("SentMessages")
+  receivedMessages DirectMessage[]    @relation("ReceivedMessages")
+  ownedCalendarItems BusinessCalendarItem[] @relation("CalendarOwner")
+  createdOrgChartVersions OrgChartVersion[]
+  staffingBudgetScenarios StaffingBudgetScenario[]
+  staffingBudgetRevisions StaffingBudgetRevision[]
 
   @@index([email])
   @@index([isActive])
@@ -215,6 +359,7 @@ model CompanyMembership {
 model Company {
   id                 String  @id @default(cuid())
   code               String  @unique // "OCTA-DE"
+  parentCompanyId    String? // group structure: subsidiary → holding
   name               String
   legalName          String?
   legalForm          String? // GmbH, AG, GmbH & Co. KG
@@ -239,6 +384,8 @@ model Company {
   deletedAt DateTime?
 
   country          Country?            @relation(fields: [countryCode], references: [code])
+  parentCompany    Company?            @relation("CompanyGroup", fields: [parentCompanyId], references: [id])
+  subsidiaries     Company[]           @relation("CompanyGroup")
   offices          Office[]
   departments      Department[]
   businessUnits    BusinessUnit[]
@@ -260,6 +407,10 @@ model Company {
   purchaseOrders   PurchaseOrder[]
   announcements    Announcement[]
   companyGoals     CompanyGoal[]
+  calendarItems    BusinessCalendarItem[]
+  positionPlans    PositionPlan[]
+  orgChartVersions OrgChartVersion[]
+  staffingBudgets  StaffingBudgetScenario[]
 
   @@map("companies")
 }
@@ -288,6 +439,8 @@ model Office {
   country   Country?   @relation(fields: [countryCode], references: [code])
   employees Employee[]
   userRoles UserRole[]
+
+  jobOpenings JobOpening[]
 
   @@unique([companyId, code])
   @@map("offices")
@@ -318,6 +471,7 @@ model Department {
   employees    Employee[]
   positions    Position[]
   userRoles    UserRole[]
+  jobOpenings  JobOpening[]
 
   @@unique([companyId, code])
   @@map("departments")
@@ -350,17 +504,21 @@ model CostCenter {
   name        String
   description String?
   isActive    Boolean @default(true)
+  parentId    String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
   company     Company      @relation(fields: [companyId], references: [id])
+  parent      CostCenter?  @relation("CostCenterHierarchy", fields: [parentId], references: [id])
+  children    CostCenter[] @relation("CostCenterHierarchy")
   departments Department[]
   budgetLines BudgetLine[]
   invoiceLines InvoiceLine[]
 
   @@unique([companyId, code])
+  @@index([parentId])
   @@map("cost_centers")
 }
 
@@ -1131,6 +1289,8 @@ model Invoice {
   notes          String?
   datevExportedAt DateTime?
   xrechnungId    String? // Leitweg-ID for XRechnung e-invoicing
+  dunningLevel   Int              @default(0) // 0 = none, 1-3 = Mahnstufe
+  lastDunnedAt   DateTime?
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1159,6 +1319,7 @@ model InvoiceLine {
   netAmount    Decimal @db.Decimal(18, 2)
   taxCodeId    String
   costCenterId String?
+  budgetCategory String? // Kostenart code from the GuV/BWA budget structure (budget-structure.ts)
 
   invoice    Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   taxCode    TaxCode     @relation(fields: [taxCodeId], references: [id])
@@ -1326,8 +1487,87 @@ model Position {
 
   department Department? @relation(fields: [departmentId], references: [id])
   employees  Employee[]
+  plans      PositionPlan[]
 
   @@map("positions")
+}
+
+enum PositionStatus {
+  OPEN
+  BUDGETED
+  FILLED
+}
+
+// Staffing plans are company-specific, including for shared position definitions.
+// FILLED is derived from active employee assignments; plans retain their vacancy state.
+model PositionPlan {
+  id         String         @id @default(cuid())
+  companyId  String
+  positionId String
+  status     PositionStatus @default(OPEN)
+  updatedAt  DateTime       @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  position Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, positionId])
+  @@map("position_plans")
+}
+
+model OrgChartVersion {
+  id          String   @id @default(cuid())
+  companyId   String
+  version     Int
+  title       String
+  note        String?
+  snapshot    Json
+  createdById String
+  createdAt   DateTime @default(now())
+
+  company   Company @relation(fields: [companyId], references: [id])
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@unique([companyId, version])
+  @@map("org_chart_versions")
+}
+
+model StaffingBudgetScenario {
+  id             String   @id @default(cuid())
+  companyId      String
+  title          String
+  year           Int
+  currency       String
+  fiscalYearStart Int
+  version        Int      @default(1)
+  plan           Json
+  result         Json
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id])
+  createdBy User @relation(fields: [createdById], references: [id])
+  revisions StaffingBudgetRevision[]
+
+  @@index([companyId, year])
+  @@map("staffing_budget_scenarios")
+}
+
+model StaffingBudgetRevision {
+  id           String   @id @default(cuid())
+  scenarioId   String
+  version      Int
+  plan         Json
+  result       Json
+  note         String?
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  scenario  StaffingBudgetScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@unique([scenarioId, version])
+  @@map("staffing_budget_revisions")
 }
 
 model EmploymentContract {
@@ -1542,6 +1782,8 @@ model CvProfile {
 model JobOpening {
   id           String    @id @default(cuid())
   companyId    String
+  departmentId String?
+  officeId     String?
   title        String
   departmentName String?
   officeName   String?
@@ -1555,6 +1797,8 @@ model JobOpening {
   deletedAt DateTime?
 
   applicants Applicant[]
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  office     Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
 
   @@map("job_openings")
 }
@@ -2014,6 +2258,7 @@ model Document {
   folderId       String?
   documentTypeId String?
   name           String
+  title          String? // optional display title, independent of the original filename
   description    String?
   currentVersion Int       @default(1)
   checkedOutById String? // null = not checked out
@@ -2332,6 +2577,43 @@ model Notification {
 
   @@index([userId, isRead, createdAt])
   @@map("notifications")
+}
+
+// Meeting minutes (Besprechungsprotokolle) — Communication Center
+model MeetingMinute {
+  id           String   @id @default(cuid())
+  companyId    String
+  title        String
+  meetingDate  DateTime
+  location     String?
+  participants String[] // display names (employees + externals)
+  content      String // markdown notes / decisions
+  status       String   @default("DRAFT") // DRAFT | FINAL
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+
+  @@index([companyId, meetingDate])
+  @@map("meeting_minutes")
+}
+
+// Internal user-to-user messages — Message Center
+model DirectMessage {
+  id          String    @id @default(cuid())
+  senderId    String
+  recipientId String
+  body        String
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  sender    User @relation("SentMessages", fields: [senderId], references: [id])
+  recipient User @relation("ReceivedMessages", fields: [recipientId], references: [id])
+
+  @@index([recipientId, readAt])
+  @@index([senderId, recipientId, createdAt])
+  @@map("direct_messages")
 }
 
 model Comment {

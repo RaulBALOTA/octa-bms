@@ -70,6 +70,17 @@ export class ContractsController {
     return this.contracts.update(companyId, user.id, id, dto);
   }
 
+  @Post(':id/renew')
+  @RequirePermission('contracts.contracts.update')
+  renew(
+    @CompanyId() companyId: string,
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { startDate: string; endDate?: string },
+  ) {
+    return this.contracts.renew(companyId, user.id, id, body.startDate, body.endDate);
+  }
+
   @Post(':id/transition')
   @RequirePermission('contracts.contracts.update')
   transition(

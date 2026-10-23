@@ -45,7 +45,7 @@ export class PartnersService {
           accountManager: {
             select: { id: true, firstName: true, lastName: true },
           },
-          _count: { select: { contacts: true, opportunities: true } },
+          _count: { select: { contacts: { where: { deletedAt: null } }, opportunities: { where: { deletedAt: null } } } },
         },
         skip: query.skip,
         take: query.pageSize,

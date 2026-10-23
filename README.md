@@ -40,21 +40,28 @@ docker compose up -d postgres redis meilisearch minio mailpit
 
 # 2. Environment
 cp .env.example apps/api/.env
+# On a fresh database, set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD
+# in apps/api/.env before seeding (password must be at least 12 characters).
 
-# 3. Install, create schema, seed demo data
+# 3. Install, create schema, initialize reference data
 pnpm install
 pnpm db:generate
 pnpm db:push          # creates tables (never use --force-reset)
-pnpm db:seed          # permissions, roles, demo company + users
+pnpm db:seed          # permissions and reference data; no demo business records
 
 # 4. Run (two terminals or `pnpm dev`)
 pnpm dev:api          # http://localhost:3000  ·  Swagger: /api/docs
 pnpm dev:web          # http://localhost:5180
 ```
 
-Demo logins (password `ChangeMe!2026`): `admin@octa.example` (system admin),
-`md@octa.example`, `sales@octa.example`, `finance@octa.example`, `hr@octa.example`,
-`employee@octa.example` — each seeded with the matching role to try the RBAC matrix.
+The normal seed creates permissions and essential reference lists. It preserves
+existing administrator access and creates no companies or sample business records.
+Log in with your administrator account, choose **Set up my company**, and enter
+your real company in Group.
+
+For an explicitly disposable demo environment, use
+`pnpm --filter @octa-bms/api prisma:seed:demo`. Only this opt-in mode adds sample
+companies and demo accounts (password `ChangeMe!2026`).
 
 Full containerized stack: `docker compose --profile full up -d --build` → web at
 `http://localhost:8080`.

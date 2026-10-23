@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { OidcController } from './oidc.controller';
 import { RbacService } from '../rbac/rbac.service';
 
 @Module({
@@ -14,7 +15,7 @@ import { RbacService } from '../rbac/rbac.service';
       signOptions: { expiresIn: Number(process.env.JWT_ACCESS_TTL ?? 900) },
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, OidcController],
   providers: [AuthService, JwtStrategy, RbacService],
   exports: [AuthService, RbacService],
 })

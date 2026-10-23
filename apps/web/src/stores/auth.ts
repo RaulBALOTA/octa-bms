@@ -73,7 +73,8 @@ export const useAuthStore = create<AuthState>()(
           me.memberships[0]?.company;
         set((state) => ({
           me,
-          companyId: state.companyId ?? defaultCompany?.id ?? null,
+          companyId: me.memberships.some((membership) => membership.company.id === state.companyId)
+            ? state.companyId : defaultCompany?.id ?? null,
         }));
       },
 

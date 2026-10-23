@@ -22,6 +22,7 @@ import {
 } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
+import { OrgChartService } from './org-chart.service';
 
 class ListEmployeesQuery extends PageQueryDto {
   @ApiPropertyOptional({ enum: EmploymentStatus })
@@ -62,7 +63,7 @@ class UpsertEmployeeDto {
 @ApiBearerAuth()
 @Controller('hr/employees')
 export class EmployeesController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly chart: OrgChartService) {}
 
   @Get()
   @RequirePermission('hr.employees.read')
@@ -116,10 +117,16 @@ export class EmployeesController {
         lastName: true,
         managerId: true,
         photoUrl: true,
-        position: { select: { name: true } },
-        department: { select: { name: true } },
+        position: { select: { id: true, code: true, name: true, level: true } },
+        department: { select: { id: true, name: true } },
       },
     });
+  }
+
+  @Get('org-chart/positions')
+  @RequirePermission('hr.employees.read')
+  async orgChartPositions(@CompanyId() companyId: string) {
+    return this.chart.positions(companyId);
   }
 
   @Get(':id')

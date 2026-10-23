@@ -7,17 +7,21 @@ import {
   Menu,
   Moon,
   Search,
+  Sparkles,
   Sun,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../lib/api';
+import { AiPanel } from '../components/ai';
 import { setLanguage } from '../i18n';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
 import { NAV_ITEMS } from './nav';
+import { MODULE_ARCHIVES, relatedModuleRecords } from './module-records';
+import { ArchivedRecordsButton, ModuleRelatedRecords } from '../components/ModuleRecords';
 
 interface SearchGroup {
   type: string;
@@ -34,15 +38,20 @@ interface Notification {
 }
 
 export function Layout() {
+  const location = useLocation();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { me, companyId, setCompany, logout } = useAuthStore();
+  const { me, companyId, setCompany, logout, loadMe } = useAuthStore();
+  const needsCompany = !!me?.isSystemAdmin && me.memberships.length === 0 && !['/group','/group/compare','/admin'].includes(location.pathname);
   const { theme, setTheme, sidebarCollapsed, toggleSidebar } = useUiStore();
+  useEffect(() => { void loadMe(); }, [loadMe]);
+  useEffect(() => { void queryClient.invalidateQueries(); }, [companyId, queryClient]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [bellOpen, setBellOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Ctrl+K / Cmd+K opens global search
@@ -109,7 +118,7 @@ export function Layout() {
           )}
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.filter((item) => item.key !== 'data' || me?.isSystemAdmin).map((item) => (
             <NavLink
               key={item.key}
               to={item.path}
@@ -172,6 +181,15 @@ export function Layout() {
               />
             </div>
           )}
+
+          {/* AI assistant */}
+          <button
+            onClick={() => setAiOpen(true)}
+            className="rounded p-1.5 text-primary hover:bg-muted"
+            title={t('ai.title')}
+          >
+            <Sparkles size={16} />
+          </button>
 
           {/* Language */}
           <button
@@ -281,9 +299,19 @@ export function Layout() {
 
         {/* Content */}
         <main className="flex-1 overflow-y-auto p-5">
-          <Outlet />
+          {!me ? <p className="p-8 text-center text-muted-foreground">{t('common.loading')}</p> : needsCompany ? <section className="mx-auto mt-12 max-w-xl rounded-xl border border-border bg-card p-8 text-center">
+            <h1 className="text-lg font-bold">{t('data.emptyWorkspace')}</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{t('data.createOwnCompany')}</p>
+            <Link to="/group" className="mt-5 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{t('data.setupCompany')}</Link>
+          </section> : <>
+            {me?.isSystemAdmin && MODULE_ARCHIVES[location.pathname] && <div className="mb-2 flex flex-wrap justify-end gap-2">{MODULE_ARCHIVES[location.pathname].map((resource) => <ArchivedRecordsButton key={resource} resource={resource} named />)}</div>}
+            <Outlet />
+            {relatedModuleRecords(location.pathname).length > 0 && <ModuleRelatedRecords key={location.pathname} resources={relatedModuleRecords(location.pathname)} />}
+          </>}
         </main>
       </div>
+
+      <AiPanel open={aiOpen} onClose={() => setAiOpen(false)} />
 
       {/* Global search overlay */}
       {searchOpen && (

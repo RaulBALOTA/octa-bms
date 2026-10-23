@@ -139,9 +139,66 @@ export class ContractsService {
         ...dto,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
         endDate: dto.endDate ? new Date(dto.endDate) : undefined,
+        signedDate: dto.signedDate ? new Date(dto.signedDate) : undefined,
         updatedById: userId,
       },
     });
+  }
+
+  /**
+   * Renewal: the current contract becomes RENEWED and a successor draft is
+   * created with the same commercial terms and the new term dates.
+   */
+  async renew(
+    companyId: string,
+    userId: string,
+    id: string,
+    startDate: string,
+    endDate?: string,
+  ) {
+    const contract = await this.get(companyId, id);
+    if (contract.status !== 'ACTIVE') {
+      throw new UnprocessableEntityException({
+        code: 'CONTRACT_NOT_ACTIVE',
+        message: 'Only active contracts can be renewed',
+      });
+    }
+
+    const successor = await this.prisma.$transaction(async (tx) => {
+      const contractNumber = await this.sequences.next(tx, companyId, 'contract', 'CT');
+      const created = await tx.contract.create({
+        data: {
+          companyId,
+          contractNumber,
+          title: contract.title,
+          description: `Renewal of ${contract.contractNumber}`,
+          contractTypeId: contract.contractTypeId,
+          partnerId: contract.partnerId,
+          value: contract.value ?? undefined,
+          currencyCode: contract.currencyCode,
+          startDate: new Date(startDate),
+          endDate: endDate ? new Date(endDate) : undefined,
+          noticePeriodDays: contract.noticePeriodDays,
+          autoRenewal: contract.autoRenewal,
+          renewalMonths: contract.renewalMonths,
+          ownerId: contract.ownerId,
+          createdById: userId,
+        },
+      });
+      await tx.contract.update({
+        where: { id },
+        data: { status: 'RENEWED', updatedById: userId },
+      });
+      return created;
+    });
+
+    this.events.emit('contracts.contract.renewed', {
+      contractId: id,
+      successorId: successor.id,
+      companyId,
+      actorId: userId,
+    });
+    return successor;
   }
 
   async transition(

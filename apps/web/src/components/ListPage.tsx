@@ -1,8 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Paged } from '../lib/api';
+import { ENDPOINT_RESOURCES, recordLabel } from '../lib/records';
+import { useAuthStore } from '../stores/auth';
+import { RecordActions } from './RecordActions';
+import { ArchivedRecordsButton } from './ModuleRecords';
 
 export interface Column<T> {
   header: string;
@@ -35,9 +39,12 @@ export function ListPage<T extends { id: string }>({
   const { t } = useTranslation();
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
+  const companyId = useAuthStore((state) => state.companyId); const admin = useAuthStore((state) => state.me?.isSystemAdmin);
+  const resource = ENDPOINT_RESOURCES[endpoint]; const showActions = !!admin && !!resource;
+  useEffect(() => { setPage(1); setQ(''); }, [companyId, endpoint]);
 
   const query = useQuery({
-    queryKey: [endpoint, q, page, extraQuery],
+    queryKey: [endpoint, companyId, q, page, extraQuery],
     queryFn: () =>
       api.get<Paged<T>>(
         `${endpoint}?page=${page}&pageSize=25&q=${encodeURIComponent(q)}${
@@ -47,10 +54,11 @@ export function ListPage<T extends { id: string }>({
   });
 
   const meta = query.data?.meta;
+  useEffect(() => { if (meta && page > Math.max(1, meta.totalPages)) setPage(Math.max(1, meta.totalPages)); }, [meta, page]);
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="text-lg font-bold">{title}</h1>
         <div className="flex-1" />
         {filters}
@@ -70,7 +78,9 @@ export function ListPage<T extends { id: string }>({
           />
         </div>
         {toolbar}
+        {showActions && <ArchivedRecordsButton resource={resource} />}
       </div>
+      {query.error && <p role="alert" className="mb-3 text-sm text-destructive">{query.error.message}</p>}
 
       <div className="overflow-x-auto rounded-xl border border-border bg-card">
         <table className="w-full text-sm">
@@ -86,13 +96,14 @@ export function ListPage<T extends { id: string }>({
                   {col.header}
                 </th>
               ))}
+              {showActions && <th className="sticky right-0 bg-card px-4 py-2.5 text-right font-medium">{t('common.actions')}</th>}
             </tr>
           </thead>
           <tbody>
             {query.isLoading ? (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={columns.length + (showActions ? 1 : 0)}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   {t('common.loading')}
@@ -117,12 +128,13 @@ export function ListPage<T extends { id: string }>({
                       {col.render(row)}
                     </td>
                   ))}
+                  {showActions && <td className="sticky right-0 bg-card px-3 py-2"><RecordActions resource={resource} id={row.id} label={recordLabel(row)} /></td>}
                 </tr>
               ))
             ) : (
               <tr>
                 <td
-                  colSpan={columns.length}
+                  colSpan={columns.length + (showActions ? 1 : 0)}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   {t('common.noResults')}

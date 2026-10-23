@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: { include: ['utif'] },
   server: {
     port: 5180,
     strictPort: true,

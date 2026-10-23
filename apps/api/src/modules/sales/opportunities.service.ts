@@ -108,6 +108,7 @@ export class OpportunitiesService {
         owner: { select: { id: true, firstName: true, lastName: true } },
         goNoGo: true,
         proposals: {
+          where: { deletedAt: null },
           select: { id: true, proposalNumber: true, title: true, status: true },
         },
         crmActivities: {

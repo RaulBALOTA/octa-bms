@@ -6,12 +6,14 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   IsNumberString,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
 import { PageQueryDto } from '../../common/pagination';
+import { VALID_PLAN_CATEGORIES } from './budget-structure';
 
 export class ListInvoicesQuery extends PageQueryDto {
   @ApiPropertyOptional({ enum: InvoiceDirection })
@@ -37,6 +39,8 @@ export class InvoiceLineDto {
   @IsNumberString() unitPrice!: string;
   @IsString() taxCodeId!: string;
   @IsOptional() @IsString() costCenterId?: string;
+  /** Kostenart code from the GuV budget structure (finance/budgets/categories) */
+  @IsOptional() @IsIn(VALID_PLAN_CATEGORIES) budgetCategory?: string;
 }
 
 export class CreateInvoiceDto {

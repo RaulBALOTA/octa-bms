@@ -1,12 +1,17 @@
 import {
+  BadRequestException,
   Body,
+  ConflictException,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Res,
+  UnsupportedMediaTypeException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -16,8 +21,8 @@ import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
 import type { Response } from 'express';
 import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { IsOptional, IsString } from 'class-validator';
+import { extname, join } from 'path';
+import { ArrayMaxSize, ArrayNotEmpty, ArrayUnique, IsArray, IsDefined, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
 import {
   AuthUser,
   CurrentUser,
@@ -34,6 +39,72 @@ const UPLOAD_DIR = join(process.cwd(), 'uploads');
 class CreateFolderDto {
   @IsString() name!: string;
   @IsOptional() @IsString() parentId?: string;
+}
+
+class MoveFolderDto {
+  @ValidateIf((_object, value) => value !== null)
+  @IsDefined()
+  @IsString()
+  parentId!: string | null;
+}
+
+export class BulkDocumentsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(200)
+  @ArrayUnique()
+  @IsString({ each: true })
+  ids!: string[];
+}
+
+export class BulkMoveDocumentsDto extends BulkDocumentsDto {
+  @ValidateIf((_object, value) => value !== null)
+  @IsDefined()
+  @IsString()
+  folderId!: string | null;
+}
+
+export class UpdateDocumentTitleDto {
+  @ValidateIf((_object, value) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(250)
+  title!: string | null;
+}
+
+const PREVIEW_MIME_TYPES: Record<string, string> = {
+  '.pdf': 'application/pdf',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.png': 'image/png',
+};
+
+interface FolderTreeRow {
+  id: string;
+  parentId: string | null;
+  name: string;
+  path: string;
+}
+
+function folderSubtree(rows: FolderTreeRow[], root: FolderTreeRow) {
+  const children = new Map<string, FolderTreeRow[]>();
+  for (const row of rows) {
+    if (row.parentId) {
+      children.set(row.parentId, [...(children.get(row.parentId) ?? []), row]);
+    }
+  }
+  const subtree = [root];
+  const visited = new Set([root.id]);
+  for (let i = 0; i < subtree.length; i++) {
+    for (const child of children.get(subtree[i].id) ?? []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
+      subtree.push(child);
+    }
+  }
+  return subtree;
 }
 
 class ListDocumentsQuery extends PageQueryDto {
@@ -53,7 +124,14 @@ export class DocumentsController {
   folders() {
     return this.prisma.folder.findMany({
       where: { deletedAt: null },
-      include: { _count: { select: { documents: true, children: true } } },
+      include: {
+        _count: {
+          select: {
+            documents: { where: { deletedAt: null } },
+            children: { where: { deletedAt: null } },
+          },
+        },
+      },
       orderBy: { path: 'asc' },
     });
   }
@@ -62,8 +140,9 @@ export class DocumentsController {
   @RequirePermission('documents.folders.create')
   async createFolder(@Body() dto: CreateFolderDto) {
     const parent = dto.parentId
-      ? await this.prisma.folder.findUniqueOrThrow({ where: { id: dto.parentId } })
+      ? await this.prisma.folder.findFirst({ where: { id: dto.parentId, deletedAt: null } })
       : null;
+    if (dto.parentId && !parent) throw new NotFoundException('Parent folder not found');
     return this.prisma.folder.create({
       data: {
         name: dto.name,
@@ -73,7 +152,119 @@ export class DocumentsController {
     });
   }
 
+  @Patch('folders/:id')
+  @RequirePermission('documents.folders.update')
+  async moveFolder(@Param('id') id: string, @Body() dto: MoveFolderDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.folder.findMany({ where: { deletedAt: null } });
+      const folder = rows.find((row) => row.id === id);
+      if (!folder) throw new NotFoundException('Folder not found');
+      const parent = dto.parentId === null
+        ? null
+        : rows.find((row) => row.id === dto.parentId);
+      if (dto.parentId !== null && !parent) {
+        throw new NotFoundException('Destination folder not found');
+      }
+      const subtree = folderSubtree(rows, folder);
+      if (subtree.some((row) => row.id === dto.parentId)) {
+        throw new BadRequestException('A folder cannot be moved into itself or a subfolder');
+      }
+      if (folder.parentId === dto.parentId) return folder;
+      if (rows.some((row) => row.parentId === dto.parentId && row.name === folder.name)) {
+        throw new ConflictException('A folder with this name already exists at the destination');
+      }
+      const paths = new Map([[folder.id, `${parent?.path ?? ''}/${folder.name}`]]);
+      const moved = await tx.folder.update({
+        where: { id },
+        data: { parentId: dto.parentId, path: paths.get(id)! },
+      });
+      // Rebuild descendants by their relationships, not a potentially ambiguous name prefix.
+      for (const child of subtree.slice(1)) {
+        const path = `${paths.get(child.parentId!)}/${child.name}`;
+        paths.set(child.id, path);
+        await tx.folder.update({ where: { id: child.id }, data: { path } });
+      }
+      return moved;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  @Delete('folders/:id')
+  @RequirePermission('documents.folders.delete')
+  async deleteFolder(@Param('id') id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      // Include previously deleted descendants so no live contents can be left behind.
+      const rows = await tx.folder.findMany();
+      const folder = rows.find((row) => row.id === id && row.deletedAt === null);
+      if (!folder) throw new NotFoundException('Folder not found');
+      const parent = rows.find((row) => row.id === folder.parentId && row.deletedAt === null);
+      const parentId = parent?.id ?? null;
+      const deletedFolderIds = folderSubtree(rows, folder).map((row) => row.id);
+      const deletedAt = new Date();
+      await tx.document.updateMany({
+        where: { folderId: { in: deletedFolderIds }, deletedAt: null },
+        data: { deletedAt },
+      });
+      await tx.folder.updateMany({
+        where: { id: { in: deletedFolderIds }, deletedAt: null },
+        data: { deletedAt },
+      });
+      return { deleted: true, parentId, deletedFolderIds };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
   // -------------------------------------------------------------- documents
+
+  @Patch(':id/title')
+  @RequirePermission('documents.documents.update')
+  async updateTitle(@Param('id') id: string, @Body() dto: UpdateDocumentTitleDto) {
+    const title = dto.title?.trim() || null;
+    const result = await this.prisma.document.updateMany({
+      where: { id, deletedAt: null },
+      data: { title },
+    });
+    if (!result.count) throw new NotFoundException('Document not found');
+    return { id, title };
+  }
+
+  private async assertDocumentsExist(tx: Prisma.TransactionClient, ids: string[]) {
+    const documents = await tx.document.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true },
+    });
+    if (documents.length !== ids.length) {
+      throw new NotFoundException('One or more selected documents no longer exist. Refresh the file list.');
+    }
+  }
+
+  @Post('bulk-move')
+  @RequirePermission('documents.documents.update')
+  async moveDocuments(@Body() dto: BulkMoveDocumentsDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertDocumentsExist(tx, dto.ids);
+      if (dto.folderId !== null) {
+        const folder = await tx.folder.findFirst({ where: { id: dto.folderId, deletedAt: null } });
+        if (!folder) throw new NotFoundException('Destination folder not found');
+      }
+      const result = await tx.document.updateMany({
+        where: { id: { in: dto.ids }, deletedAt: null },
+        data: { folderId: dto.folderId },
+      });
+      return { moved: result.count };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  @Post('bulk-delete')
+  @RequirePermission('documents.documents.delete')
+  async deleteDocuments(@Body() dto: BulkDocumentsDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertDocumentsExist(tx, dto.ids);
+      const result = await tx.document.updateMany({
+        where: { id: { in: dto.ids }, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      return { deleted: result.count };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
 
   @Get()
   @RequirePermission('documents.documents.read')
@@ -82,7 +273,10 @@ export class DocumentsController {
       deletedAt: null,
       ...(query.folderId ? { folderId: query.folderId } : {}),
       ...(query.q
-        ? { name: { contains: query.q, mode: 'insensitive' } }
+        ? { OR: [
+          { name: { contains: query.q, mode: 'insensitive' } },
+          { title: { contains: query.q, mode: 'insensitive' } },
+        ] }
         : {}),
     };
     const [data, total] = await Promise.all([
@@ -121,6 +315,14 @@ export class DocumentsController {
     @Body() body: { folderId?: string; documentId?: string },
   ) {
     if (!file) throw new NotFoundException('No file provided');
+    if (body.folderId) {
+      const folder = await this.prisma.folder.findFirst({ where: { id: body.folderId, deletedAt: null } });
+      if (!folder) throw new NotFoundException('Folder not found');
+    }
+    if (body.documentId) {
+      const document = await this.prisma.document.findFirst({ where: { id: body.documentId, deletedAt: null } });
+      if (!document) throw new NotFoundException('Document not found');
+    }
     if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 
     const storageKey = `${randomUUID()}-${file.originalname.replace(/[^\w.\-]/g, '_')}`;
@@ -176,20 +378,40 @@ export class DocumentsController {
   @Get(':id/download')
   @RequirePermission('documents.documents.read')
   async download(@Param('id') id: string, @Res() res: Response) {
+    return this.streamDocument(id, res, false);
+  }
+
+  @Get(':id/preview')
+  @RequirePermission('documents.documents.read')
+  async preview(@Param('id') id: string, @Res() res: Response) {
+    return this.streamDocument(id, res, true);
+  }
+
+  private async streamDocument(id: string, res: Response, inline: boolean) {
     const document = await this.prisma.document.findFirst({
       where: { id, deletedAt: null },
       include: { versions: { orderBy: { version: 'desc' }, take: 1 } },
     });
     const version = document?.versions[0];
     if (!document || !version) throw new NotFoundException();
+    const previewMime = PREVIEW_MIME_TYPES[extname(version.fileName).toLowerCase()]
+      ?? (Object.values(PREVIEW_MIME_TYPES).includes(version.mimeType) ? version.mimeType : undefined);
+    if (inline && !previewMime) {
+      throw new UnsupportedMediaTypeException('Preview is available for PDF, JPG, PNG and TIFF files');
+    }
     const filePath = join(UPLOAD_DIR, version.storageKey);
     if (!existsSync(filePath)) throw new NotFoundException('File missing on disk');
 
-    res.setHeader('Content-Type', version.mimeType);
+    res.setHeader('Content-Type', inline ? previewMime! : version.mimeType);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(version.fileName)}"`,
+      `${inline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(version.fileName)}"`,
     );
-    createReadStream(filePath).pipe(res);
+    const stream = createReadStream(filePath);
+    stream.on('error', () => res.destroy());
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
   }
 }

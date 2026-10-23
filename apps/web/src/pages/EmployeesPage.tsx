@@ -4,7 +4,7 @@ import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
 import { Column, ListPage, StatusBadge } from '../components/ListPage';
-import { SubNav } from '../components/SubNav';
+import { HrNav } from '../components/HrNav';
 import {
   Avatar,
   Button,
@@ -377,12 +377,7 @@ export function EmployeesPage() {
 
   return (
     <>
-      <SubNav
-        items={[
-          { label: t('hr.title'), to: '/hr/employees' },
-          { label: t('nav.leave'), to: '/hr/leave' },
-        ]}
-      />
+      <HrNav />
       <ListPage<Employee>
         title={t('hr.title')}
         endpoint="/hr/employees"

@@ -10,11 +10,34 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class ReferenceDataController {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Own company's letterhead data — readable by every authenticated user. */
+  @Get('company-profile')
+  companyProfile(@CompanyId() companyId: string) {
+    return this.prisma.company.findUniqueOrThrow({
+      where: { id: companyId },
+      select: {
+        id: true,
+        name: true,
+        legalName: true,
+        legalForm: true,
+        vatId: true,
+        taxNumber: true,
+        commercialRegister: true,
+        street: true,
+        postalCode: true,
+        city: true,
+        phone: true,
+        email: true,
+        website: true,
+      },
+    });
+  }
+
   @Get('departments')
   departments(@CompanyId() companyId: string) {
     return this.prisma.department.findMany({
       where: { companyId, deletedAt: null, isActive: true },
-      select: { id: true, code: true, name: true },
+      select: { id: true, code: true, name: true, parentId: true, managerId: true },
       orderBy: { name: 'asc' },
     });
   }

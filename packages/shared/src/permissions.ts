@@ -4,6 +4,7 @@
  * permissions table from the same structure (apps/api/prisma/seed.ts).
  */
 export const PERMISSION_MODULES = {
+  calendar: ['items'],
   corporate: ['dashboard', 'goals', 'announcements'],
   crm: ['partners', 'contacts', 'activities'],
   sales: ['opportunities', 'proposals', 'gonogo'],

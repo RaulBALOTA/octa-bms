@@ -6,6 +6,7 @@ const prisma = new PrismaClient();
 
 // ---------------------------------------------------------------- permissions
 const MODULES: Record<string, string[]> = {
+  calendar: ['items'],
   corporate: ['dashboard', 'goals', 'announcements'],
   crm: ['partners', 'contacts', 'activities'],
   sales: ['opportunities', 'proposals', 'gonogo'],
@@ -17,6 +18,7 @@ const MODULES: Record<string, string[]> = {
   assets: ['assets', 'licenses'],
   knowledge: ['articles'],
   documents: ['documents', 'folders'],
+  communication: ['meetings', 'messages', 'mail'],
   workflow: ['definitions', 'tasks'],
   bi: ['dashboards', 'reports'],
   identity: ['users', 'roles', 'groups', 'apikeys'],
@@ -72,18 +74,27 @@ async function main() {
   // ------------------------------------------------------------------- roles
   const adminRole = await seedRole('SYSTEM_ADMIN', 'System Administrator', [/.*/]);
   const mdRole = await seedRole('MANAGING_DIRECTOR', 'Managing Director', [
-    /\.read$/, /\.approve$/, /\.export$/, /^corporate\./,
+    /\.read$/, /\.approve$/, /\.export$/, /^corporate\./, /^calendar\./,
   ]);
   const salesRole = await seedRole('SALES_MANAGER', 'Sales Manager', [
-    /^crm\./, /^sales\./, /^contracts\.contracts\.read$/,
+    /^calendar\.items\.(read|create|update)$/,
+    /^crm\./, /^sales\./, /^contracts\.contracts\.read$/, /^communication\./,
   ]);
   const financeRole = await seedRole('FINANCE_MANAGER', 'Finance Manager', [
+    /^calendar\.items\.(read|create|update)$/,
     /^finance\./, /^crm\.partners\.read$/, /^contracts\.contracts\.read$/,
+    /^communication\./,
   ]);
-  const hrRole = await seedRole('HR_MANAGER', 'HR Manager', [/^hr\./]);
+  const hrRole = await seedRole('HR_MANAGER', 'HR Manager', [
+    /^calendar\.items\.(read|create|update)$/,
+    /^hr\./, /^communication\./,
+  ]);
   const employeeRole = await seedRole('EMPLOYEE', 'Employee (self-service)', [
+    /^calendar\.items\.(read|create|update)$/,
     /^hr\.leave\.(read|create)$/, /^knowledge\.articles\.read$/,
     /^hr\.employees\.read$/, /^workflow\.tasks\.(read|approve)$/,
+    /^communication\.meetings\.(read|create|update)$/,
+    /^communication\.messages\.(read|create)$/,
   ]);
 
   // -------------------------------------------------------------- reference
@@ -128,6 +139,21 @@ async function main() {
   ];
   for (const ct of contractTypes) {
     await prisma.contractTypeRef.upsert({ where: { code: ct.code }, update: {}, create: ct });
+  }
+
+  if (!process.argv.includes('--demo') && process.env.OCTA_SEED_DEMO !== '1') {
+    const admins = await prisma.user.count({ where: { isSystemAdmin: true, isActive: true, deletedAt: null } });
+    if (!admins) {
+      const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+      const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password || password.length < 12) {
+        throw new Error('Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD (at least 12 characters) to create your own first admin account. Demo data is disabled.');
+      }
+      const user = await prisma.user.create({ data: { email, firstName: 'Administrator', lastName: '', isSystemAdmin: true, passwordHash: await argon2.hash(password) } });
+      await prisma.userRole.create({ data: { userId: user.id, roleId: adminRole.id } });
+    }
+    console.log('Reference data and admin access ready. No demo companies or business records were created.');
+    return;
   }
 
   const assetCategories = [
@@ -299,6 +325,276 @@ async function main() {
       },
     });
   }
+
+  // ------------------------------------------------- group: subsidiaries
+  const countriesExtra = [
+    { code: 'AE', name: 'United Arab Emirates', nameDe: 'Vereinigte Arabische Emirate', isEU: false, phoneCode: '+971' },
+  ];
+  for (const c of countriesExtra) {
+    await prisma.country.upsert({ where: { code: c.code }, update: {}, create: c });
+  }
+  // USD→EUR rate for group consolidation
+  const usdRate = await prisma.exchangeRate.findFirst({
+    where: { currencyCode: 'USD' },
+  });
+  if (!usdRate) {
+    await prisma.exchangeRate.create({
+      data: { currencyCode: 'USD', rateToEUR: '0.92000000', validFrom: new Date('2026-01-01') },
+    });
+  }
+  await prisma.taxCode.upsert({
+    where: { code: 'AT-20' },
+    update: {},
+    create: { code: 'AT-20', name: 'Umsatzsteuer 20% (AT)', ratePercent: '20.00', countryCode: 'AT' },
+  });
+  await prisma.taxCode.upsert({
+    where: { code: 'AE-0' },
+    update: {},
+    create: { code: 'AE-0', name: 'Zero-rated (UAE export)', ratePercent: '0.00', countryCode: 'AE', type: 'EXEMPT' },
+  });
+
+  const subsidiaries = [
+    {
+      code: 'OCTA-AT',
+      name: 'OCTA Engineering Austria GmbH',
+      legalForm: 'GmbH',
+      city: 'Wien',
+      countryCode: 'AT',
+      currency: 'EUR',
+      locale: 'de',
+      officeCode: 'VIE',
+      officeName: 'Wien Office',
+      employees: [
+        { nr: 'AT-0001', first: 'Lukas', last: 'Steiner', discipline: 'HVAC Engineering' },
+        { nr: 'AT-0002', first: 'Anna', last: 'Berger', discipline: 'Project Controls' },
+      ],
+      client: { nr: 'C-2026-00001', name: 'OMV AG', city: 'Wien' },
+      invoice: { nr: 'R-2026-00001', net: '38500.00', tax: '7700.00', gross: '46200.00', taxCode: 'AT-20', desc: 'TGA-Planung Bürocampus Wien' },
+    },
+    {
+      code: 'OCTA-ME',
+      name: 'OCTA Engineering Middle East FZE',
+      legalForm: 'FZE',
+      city: 'Dubai',
+      countryCode: 'AE',
+      currency: 'USD',
+      locale: 'en',
+      officeCode: 'DXB',
+      officeName: 'Dubai Office',
+      employees: [
+        { nr: 'ME-0001', first: 'Omar', last: 'Haddad', discipline: 'Process Engineering' },
+      ],
+      client: { nr: 'C-2026-00001', name: 'Emirates Global Industries LLC', city: 'Dubai' },
+      invoice: { nr: 'R-2026-00001', net: '120000.00', tax: '0.00', gross: '120000.00', taxCode: 'AE-0', desc: 'FEED study desalination plant' },
+    },
+  ];
+
+  for (const sub of subsidiaries) {
+    const subCompany = await prisma.company.upsert({
+      where: { code: sub.code },
+      update: { parentCompanyId: company.id },
+      create: {
+        code: sub.code,
+        name: sub.name,
+        legalName: sub.name,
+        legalForm: sub.legalForm,
+        city: sub.city,
+        countryCode: sub.countryCode,
+        defaultCurrency: sub.currency,
+        defaultLocale: sub.locale,
+        parentCompanyId: company.id,
+      },
+    });
+    const subOffice = await prisma.office.upsert({
+      where: { companyId_code: { companyId: subCompany.id, code: sub.officeCode } },
+      update: {},
+      create: {
+        companyId: subCompany.id,
+        code: sub.officeCode,
+        name: sub.officeName,
+        city: sub.city,
+        countryCode: sub.countryCode,
+        isHQ: true,
+      },
+    });
+    for (const emp of sub.employees) {
+      await prisma.employee.upsert({
+        where: { companyId_employeeNumber: { companyId: subCompany.id, employeeNumber: emp.nr } },
+        update: {},
+        create: {
+          companyId: subCompany.id,
+          officeId: subOffice.id,
+          employeeNumber: emp.nr,
+          firstName: emp.first,
+          lastName: emp.last,
+          discipline: emp.discipline,
+          status: 'ACTIVE',
+          hireDate: new Date('2024-03-01'),
+        },
+      });
+    }
+    // group leadership gets access to every subsidiary
+    for (const email of ['admin@octa.example', 'md@octa.example', 'finance@octa.example']) {
+      const groupUser = await prisma.user.findUnique({ where: { email } });
+      if (groupUser) {
+        await prisma.companyMembership.upsert({
+          where: { userId_companyId: { userId: groupUser.id, companyId: subCompany.id } },
+          update: {},
+          create: { userId: groupUser.id, companyId: subCompany.id },
+        });
+        const mdRoleRef = await prisma.role.findUnique({ where: { code: 'MANAGING_DIRECTOR' } });
+        if (mdRoleRef) {
+          const existingRole = await prisma.userRole.findFirst({
+            where: { userId: groupUser.id, roleId: mdRoleRef.id, companyId: subCompany.id },
+          });
+          if (!existingRole) {
+            await prisma.userRole.create({
+              data: { userId: groupUser.id, roleId: mdRoleRef.id, companyId: subCompany.id },
+            });
+          }
+        }
+      }
+    }
+    // local client + one sent invoice so group consolidation has revenue
+    const subClient = await prisma.businessPartner.upsert({
+      where: { companyId_partnerNumber: { companyId: subCompany.id, partnerNumber: sub.client.nr } },
+      update: {},
+      create: {
+        companyId: subCompany.id,
+        partnerNumber: sub.client.nr,
+        type: 'CLIENT',
+        status: 'ACTIVE',
+        name: sub.client.name,
+        city: sub.client.city,
+        countryCode: sub.countryCode,
+        currencyCode: sub.currency,
+      },
+    });
+    // register sequences so generated numbers continue after the seeded ones
+    for (const seq of [
+      { entityType: 'partner:CLIENT', prefix: 'C', lastNumber: 1 },
+      { entityType: 'invoice:OUTGOING', prefix: 'R', lastNumber: 1 },
+    ]) {
+      const existingSeq = await prisma.numberSequence.findUnique({
+        where: {
+          companyId_entityType_year: {
+            companyId: subCompany.id,
+            entityType: seq.entityType,
+            year: 2026,
+          },
+        },
+      });
+      if (!existingSeq) {
+        await prisma.numberSequence.create({
+          data: { companyId: subCompany.id, ...seq, year: 2026 },
+        });
+      }
+    }
+
+    const taxRef = await prisma.taxCode.findUnique({ where: { code: sub.invoice.taxCode } });
+    const existingInvoice = await prisma.invoice.findFirst({
+      where: { companyId: subCompany.id, invoiceNumber: sub.invoice.nr, direction: 'OUTGOING' },
+    });
+    if (!existingInvoice && taxRef) {
+      await prisma.invoice.create({
+        data: {
+          companyId: subCompany.id,
+          partnerId: subClient.id,
+          direction: 'OUTGOING',
+          status: 'SENT',
+          invoiceNumber: sub.invoice.nr,
+          invoiceDate: new Date('2026-06-15'),
+          serviceDate: new Date('2026-06-10'),
+          dueDate: new Date('2026-07-15'),
+          currencyCode: sub.currency,
+          netAmount: sub.invoice.net,
+          taxAmount: sub.invoice.tax,
+          grossAmount: sub.invoice.gross,
+          lines: {
+            create: [{
+              position: 1,
+              description: sub.invoice.desc,
+              quantity: '1',
+              unit: 'LS',
+              unitPrice: sub.invoice.net,
+              netAmount: sub.invoice.net,
+              taxCodeId: taxRef.id,
+            }],
+          },
+        },
+      });
+    }
+  }
+
+  // -------------------------------------------------------- manager hierarchy
+  const byNumber = async (nr: string) =>
+    prisma.employee.findUnique({
+      where: { companyId_employeeNumber: { companyId: company.id, employeeNumber: nr } },
+    });
+  const md0 = await byNumber('E-0001');
+  const maria0 = await byNumber('E-0003');
+  if (md0 && maria0) {
+    // MD leads BD + Maria; Maria leads the two engineers
+    for (const nr of ['E-0002', 'E-0003']) {
+      const emp = await byNumber(nr);
+      if (emp && !emp.managerId) {
+        await prisma.employee.update({
+          where: { id: emp.id },
+          data: { managerId: md0.id },
+        });
+      }
+    }
+    for (const nr of ['E-0004', 'E-0005']) {
+      const emp = await byNumber(nr);
+      if (emp && !emp.managerId) {
+        await prisma.employee.update({
+          where: { id: emp.id },
+          data: { managerId: maria0.id },
+        });
+      }
+    }
+  }
+
+  // ---------------------------------------------------------- demo recruiting
+  let opening = await prisma.jobOpening.findFirst({
+    where: { companyId: company.id, title: 'Senior Electrical Engineer (m/w/d)' },
+  });
+  if (!opening) {
+    opening = await prisma.jobOpening.create({
+      data: {
+        companyId: company.id,
+        title: 'Senior Electrical Engineer (m/w/d)',
+        departmentName: 'Engineering',
+        officeName: 'München HQ',
+        status: 'OPEN',
+        publishedAt: new Date(),
+        description: 'EMSR-Planung für Industrieanlagen, 8+ Jahre Erfahrung.',
+      },
+    });
+    const applicants = [
+      { firstName: 'Jonas', lastName: 'Weber', email: 'j.weber@example.com', source: 'LinkedIn', stage: 'NEW' },
+      { firstName: 'Aylin', lastName: 'Kaya', email: 'a.kaya@example.com', source: 'StepStone', stage: 'SCREENING' },
+      { firstName: 'Petra', lastName: 'Lang', email: 'p.lang@example.com', source: 'Referral', stage: 'INTERVIEW' },
+    ];
+    for (const a of applicants) {
+      await prisma.applicant.create({
+        data: { ...a, jobOpeningId: opening.id, gdprConsentDate: new Date() },
+      });
+    }
+  }
+
+  // ------------------------------------------------------------ bank account
+  await prisma.bankAccount.upsert({
+    where: { iban: 'DE02120300000000202051' },
+    update: {},
+    create: {
+      companyId: company.id,
+      name: 'Geschäftskonto DKB',
+      iban: 'DE02120300000000202051',
+      bic: 'BYLADEM1001',
+      openingBalance: '250000.00',
+    },
+  });
 
   // ------------------------------------------------- demo HR & asset data
   const allEmployees = await prisma.employee.findMany({

@@ -1,6 +1,7 @@
+import { useQuery } from '@tanstack/react-query';
 import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../stores/auth';
 
 export function LoginPage() {
@@ -11,6 +12,17 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [params] = useSearchParams();
+  const ssoError = params.get('sso');
+
+  const { data: sso } = useQuery({
+    queryKey: ['oidc-status'],
+    queryFn: async () => {
+      const res = await fetch('/api/v1/auth/oidc/status');
+      return (await res.json()) as { enabled: boolean };
+    },
+    staleTime: 300_000,
+  });
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -71,6 +83,33 @@ export function LoginPage() {
         >
           {t('auth.login')}
         </button>
+
+        {sso?.enabled && (
+          <>
+            <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              {t('auth.or')}
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            <a
+              href="/api/v1/auth/oidc/login"
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-border py-2 text-sm font-medium hover:bg-muted"
+            >
+              <svg width="15" height="15" viewBox="0 0 21 21" aria-hidden>
+                <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+              </svg>
+              {t('auth.microsoftLogin')}
+            </a>
+          </>
+        )}
+        {ssoError && (
+          <p className="mt-3 text-center text-xs text-destructive">
+            {t('auth.ssoFailed')} ({ssoError})
+          </p>
+        )}
       </form>
     </div>
   );

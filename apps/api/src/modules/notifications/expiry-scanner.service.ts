@@ -27,7 +27,40 @@ export class ExpiryScannerService {
       this.scanContracts(),
       this.scanCertificates(),
       this.scanBirthdays(),
+      this.markOverdueInvoices(),
+      this.gdprDeleteApplicants(),
     ]);
+  }
+
+  /**
+   * GDPR retention: applicant records past their deletion date are removed
+   * for good (hard delete — the one place soft delete does not apply).
+   */
+  private async gdprDeleteApplicants() {
+    const due = await this.prisma.applicant.findMany({
+      where: { gdprDeleteBy: { not: null, lt: new Date() } },
+      select: { id: true },
+    });
+    if (!due.length) return;
+    const ids = due.map((applicant) => applicant.id);
+    await this.prisma.interview.deleteMany({ where: { applicantId: { in: ids } } });
+    await this.prisma.$executeRaw`DELETE FROM applicants WHERE id = ANY(${ids})`;
+    this.logger.log(`GDPR: hard-deleted ${ids.length} applicants past retention`);
+  }
+
+  /** SENT/PARTIALLY_PAID invoices past their due date become OVERDUE. */
+  private async markOverdueInvoices() {
+    const result = await this.prisma.invoice.updateMany({
+      where: {
+        deletedAt: null,
+        status: { in: ['SENT', 'PARTIALLY_PAID'] },
+        dueDate: { lt: new Date() },
+      },
+      data: { status: 'OVERDUE' },
+    });
+    if (result.count > 0) {
+      this.logger.log(`marked ${result.count} invoices OVERDUE`);
+    }
   }
 
   private async scanContracts() {

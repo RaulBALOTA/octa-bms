@@ -1,0 +1,11 @@
+# Data model
+
+Additive Prisma models: BusinessCalendarItem, BusinessCalendarChecklistItem, BusinessCalendarEvidence, BusinessCalendarAccessGrant and BusinessCalendarHistory. Company and owner have foreign keys; child records reference their item. Grants are unique by item/user; recurrence occurrences are unique by company/series/originalOccurrenceKey. All reads of items explicitly require companyId and deletedAt=null.
+
+Items carry domain/kind/status/sensitivity enums, priority 1–4, responsible owner, creator, dates, manual source, optional validated polymorphic business link and optimistic version. Collections index company/domain/status, owner and primary dates. Completion/evidence/edit/archive and generated occurrences write immutable history in the same transaction.
+
+Date-only ISO strings represent local calendar dates. Hard due date, internal target and forecast are independent. Timed starts/ends and timed hard deadlines persist as UTC DateTime and retain original IANA timezone; inputs require explicit offsets. All-day ranges use inclusive start/exclusive end. Appointments need start/end. Impossible dates and mixed start representations are rejected. Date-only deadlines become overdue only after the local calendar day ends; timed deadlines become overdue at the instant.
+
+Core recurrence uses DAILY/WEEKLY/MONTHLY/YEARLY + positive interval and optional inclusive until. Monthly/yearly dates clamp to month-end from the original anchor, so Jan 31 → Feb 28 → Mar 31. Individual occurrence edits keep the original series identity. Completing creates one next item with fresh checklist and no evidence; target/deadline buffers and visibility carry forward. Concurrent/replayed writes lose the version comparison and cannot double-generate. Completed recurring occurrences cannot reopen; changing the series rule requires canceling the pending occurrence and creating a replacement. Cancellation stops generation until reopened. No legal authority, weekends, holidays or timed DST recurrence is inferred.
+
+Evidence is a user-entered HTTPS link with creator/time; it is not asserted to be independently verified. No files or provider tokens are stored in calendar records. Forecast is a category/date, not a statistical probability.

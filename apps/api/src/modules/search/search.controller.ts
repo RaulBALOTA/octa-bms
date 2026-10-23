@@ -1,11 +1,13 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   AuthUser,
   CompanyId,
   CurrentUser,
+  RequirePermission,
 } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { SearchIndexService } from './search-index.service';
 
 interface SearchHit {
   type: string;
@@ -15,16 +17,38 @@ interface SearchHit {
   link: string;
 }
 
+const TYPE_PERMISSION: Record<string, string> = {
+  partner: 'crm.partners.read',
+  contact: 'crm.contacts.read',
+  employee: 'hr.employees.read',
+  contract: 'contracts.contracts.read',
+  invoice: 'finance.invoices.read',
+  asset: 'assets.assets.read',
+  opportunity: 'sales.opportunities.read',
+  article: 'knowledge.articles.read',
+};
+
 /**
- * Global "search everywhere" (Dynamics-style). Database-backed v1; the
- * Meilisearch indexer replaces the per-entity queries transparently later.
- * Results are filtered by the caller's module read permissions.
+ * Global "search everywhere" (Dynamics-style). Uses Meilisearch when
+ * configured and reachable (typo tolerance, ranking); otherwise falls back
+ * to database ILIKE queries. Results are always filtered by the caller's
+ * module read permissions.
  */
 @ApiTags('search')
 @ApiBearerAuth()
 @Controller('search')
 export class SearchController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly searchIndex: SearchIndexService,
+  ) {}
+
+  @Post('reindex')
+  @RequirePermission('admin.settings.update')
+  async reindex() {
+    const counts = await this.searchIndex.reindexAll();
+    return { engine: 'meilisearch', counts };
+  }
 
   @Get()
   async search(
@@ -40,6 +64,38 @@ export class SearchController {
 
     const can = (perm: string) =>
       user.isSystemAdmin || user.permissions.includes(perm);
+
+    // ---- Meilisearch path (typo-tolerant, ranked) ----
+    const allowedTypes = Object.entries(TYPE_PERMISSION)
+      .filter(([, permission]) => can(permission))
+      .map(([type]) => type);
+    const meiliHits = await this.searchIndex.search(companyId, term, allowedTypes, take);
+    if (meiliHits !== null) {
+      const groups = new Map<string, SearchHit[]>();
+      for (const hit of meiliHits) {
+        const list = groups.get(hit.type) ?? [];
+        if (list.length < take) {
+          list.push({
+            type: hit.type,
+            id: hit.entityId,
+            title: hit.title,
+            subtitle: hit.subtitle,
+            link: hit.link,
+          });
+        }
+        groups.set(hit.type, list);
+      }
+      return {
+        query: q,
+        engine: 'meilisearch',
+        groups: [...groups.entries()].map(([type, hits]) => ({
+          type: `${type}s`,
+          hits,
+        })),
+      };
+    }
+
+    // ---- database fallback ----
 
     const [partners, contacts, employees, contracts, invoices, assets] =
       await Promise.all([
@@ -183,6 +239,6 @@ export class SearchController {
       },
     ].filter((g) => g.hits.length > 0);
 
-    return { query: q, groups };
+    return { query: q, engine: 'database', groups };
   }
 }

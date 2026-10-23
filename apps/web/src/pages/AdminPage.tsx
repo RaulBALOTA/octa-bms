@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ShieldCheck } from 'lucide-react';
+import { Plug, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, Paged } from '../lib/api';
@@ -14,6 +14,7 @@ import {
   useToast,
 } from '../components/ui';
 import { useAuthStore } from '../stores/auth';
+import { RecordActions, RecordCreateButton } from '../components/RecordActions';
 
 interface UserRow {
   id: string;
@@ -115,6 +116,27 @@ export function AdminPage() {
     queryFn: () => api.get<Role[]>('/identity/roles'),
   });
 
+  const { data: integrations } = useQuery({
+    queryKey: ['integrations'],
+    queryFn: () =>
+      api.get<Record<string, boolean>>('/communication/integrations'),
+  });
+
+  const reindex = useMutation({
+    mutationFn: () => api.post<{ counts: Record<string, number> }>('/search/reindex'),
+    onSuccess: (result) => {
+      const total = Object.values(result.counts).reduce((sum, n) => sum + n, 0);
+      toast(`${t('admin.reindexed')}: ${total}`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const testTeams = useMutation({
+    mutationFn: () => api.post('/communication/integrations/test-teams'),
+    onSuccess: () => toast(t('admin.teamsTested')),
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
   const assign = useMutation({
     mutationFn: ({ userId, roleId }: { userId: string; roleId: string }) =>
       api.post('/identity/roles/assign', { userId, roleId, companyId }),
@@ -212,6 +234,7 @@ export function AdminPage() {
                         </option>
                       ))}
                     </SelectInput>
+                    <RecordActions resource="users" id={user.id} label={`${user.firstName} ${user.lastName}`} />
                   </td>
                 </tr>
               ))}
@@ -221,8 +244,61 @@ export function AdminPage() {
       </section>
 
       <section className="rounded-xl border border-border bg-card">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-semibold">
+          <Plug size={14} className="text-primary" />
+          {t('admin.integrations')}
+        </div>
+        <ul className="divide-y divide-border">
+          {integrations &&
+            (
+              [
+                ['ai', 'AI (Claude API)'],
+                ['meilisearch', 'Meilisearch'],
+                ['entraSso', 'Azure Entra SSO'],
+                ['graphMail', 'Microsoft Graph Mail'],
+                ['teamsWebhook', 'Teams Webhook'],
+              ] as const
+            ).map(([key, label]) => (
+              <li key={key} className="flex items-center gap-3 px-4 py-2.5">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    integrations[key] ? 'bg-success' : 'bg-muted-foreground/40'
+                  }`}
+                />
+                <span className="flex-1 text-sm">{label}</span>
+                <span className="text-xs text-muted-foreground">
+                  {integrations[key] ? t('admin.connected') : t('admin.notConfigured')}
+                </span>
+                {key === 'meilisearch' && integrations[key] && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={reindex.isPending}
+                    onClick={() => reindex.mutate()}
+                  >
+                    <RefreshCw size={12} />
+                    {t('admin.reindex')}
+                  </Button>
+                )}
+                {key === 'teamsWebhook' && integrations[key] && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={testTeams.isPending}
+                    onClick={() => testTeams.mutate()}
+                  >
+                    {t('admin.test')}
+                  </Button>
+                )}
+              </li>
+            ))}
+        </ul>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card">
         <div className="border-b border-border px-4 py-3 text-sm font-semibold">
           {t('admin.roles')}
+          <RecordCreateButton resource="roles" />
         </div>
         <ul className="divide-y divide-border">
           {roles?.map((role) => (
@@ -235,6 +311,7 @@ export function AdminPage() {
                 {role.permissions.length} {t('admin.permissions')} ·{' '}
                 {role._count.userRoles} {t('admin.assignments')}
               </div>
+              <RecordActions resource="roles" id={role.id} label={role.name} />
             </li>
           ))}
         </ul>

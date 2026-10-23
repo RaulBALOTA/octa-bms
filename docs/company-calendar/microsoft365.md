@@ -1,0 +1,7 @@
+# Microsoft 365 — not connected
+
+Phase 3 is not implemented in this standalone release. Existing Entra OIDC login is identity only and does not authorize reading calendars. Calendar capability/settings explicitly report Microsoft as unconnected. No tokens, webhook subscription, calendar cache or external write is created.
+
+Before implementation/live verification: register an Entra application with exact HTTPS redirect allowlist; confirm delegated Calendars.Read/ReadWrite and offline access according to desired actions; configure encrypted token cache/key management; bind tenant/account to the authenticated OCTA user; use state/PKCE; provide a public HTTPS webhook and durable worker/outbox; decide bounded calendarView windows and cursor retention. Consent must be user-driven and privacy reviewed.
+
+Planned adapter: selected-calendar discovery → bounded calendarView and delta pagination → private per-user mirror → subscription renewal/lifecycle reconciliation. Outlook owns mirror fields; OCTA owns obligations. Outlook event create with isOnlineMeeting/provider creates a Teams invitation; standalone onlineMeeting alone does not constitute a calendar invitation. Invitations and publishing reminders require explicit user action. Provider errors must preserve OCTA usability. Actual API behavior and scopes must be checked against Microsoft documentation when Phase 3 is implemented; this file is not a claim of live compatibility.

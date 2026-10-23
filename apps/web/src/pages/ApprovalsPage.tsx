@@ -1,12 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, FileText, Inbox, Palmtree, Wallet, X } from 'lucide-react';
+import {
+  Check,
+  FileText,
+  Inbox,
+  Palmtree,
+  ShoppingCart,
+  Wallet,
+  X,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
 import { SubNav } from '../components/SubNav';
 import { Button, Skeleton, useToast } from '../components/ui';
 
 interface ApprovalItem {
-  kind: 'LEAVE' | 'INVOICE' | 'CONTRACT';
+  kind: 'LEAVE' | 'INVOICE' | 'CONTRACT' | 'PURCHASE';
   id: string;
   title: string;
   subtitle: string;
@@ -14,7 +22,12 @@ interface ApprovalItem {
   requestedAt: string;
 }
 
-const KIND_ICON = { LEAVE: Palmtree, INVOICE: Wallet, CONTRACT: FileText };
+const KIND_ICON = {
+  LEAVE: Palmtree,
+  INVOICE: Wallet,
+  CONTRACT: FileText,
+  PURCHASE: ShoppingCart,
+};
 
 export function ApprovalsPage() {
   const { t, i18n } = useTranslation();
@@ -45,6 +58,10 @@ export function ApprovalsPage() {
         case 'CONTRACT':
           return api.post(`/contracts/${item.id}/transition`, {
             status: approve ? 'ACTIVE' : 'IN_REVIEW',
+          });
+        case 'PURCHASE':
+          return api.post(`/procurement/requests/${item.id}/decide`, {
+            decision: approve ? 'APPROVED' : 'REJECTED',
           });
       }
     },

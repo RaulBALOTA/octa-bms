@@ -37,6 +37,8 @@ export class CompanyContextGuard implements CanActivate {
     const requested = req.header('X-Company-Id');
 
     if (requested) {
+      const company = await this.prisma.company.findFirst({ where: { id: requested, deletedAt: null, isActive: true }, select: { id: true } });
+      if (!company) throw new ForbiddenException('Requested company is inactive or deleted');
       if (!user.isSystemAdmin) {
         const membership = await this.prisma.companyMembership.findUnique({
           where: {
@@ -52,7 +54,7 @@ export class CompanyContextGuard implements CanActivate {
     }
 
     const fallback = await this.prisma.companyMembership.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, company: { deletedAt: null, isActive: true } },
       orderBy: { isDefault: 'desc' },
     });
     user.companyId = fallback?.companyId ?? null;

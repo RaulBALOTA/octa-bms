@@ -1,9 +1,11 @@
+import { RecordActions } from '../components/RecordActions';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Plus, Trophy, XCircle } from 'lucide-react';
 import { DragEvent, FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { api, Paged } from '../lib/api';
+import { SubNav } from '../components/SubNav';
 import {
   Avatar,
   Button,
@@ -14,6 +16,7 @@ import {
   TextInput,
   useToast,
 } from '../components/ui';
+import { OpportunityDrawer } from './OpportunityDrawer';
 
 interface OpportunityCard {
   id: string;
@@ -162,6 +165,7 @@ export function PipelinePage() {
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data: columns, isLoading } = useQuery({
     queryKey: ['pipeline'],
@@ -206,6 +210,12 @@ export function PipelinePage() {
 
   return (
     <div className="flex h-full flex-col">
+      <SubNav
+        items={[
+          { label: t('sales.pipeline'), to: '/sales/pipeline' },
+          { label: t('sales.winLoss'), to: '/sales/win-loss' },
+        ]}
+      />
       <div className="mb-4 flex items-center gap-3">
         <h1 className="text-lg font-bold">{t('sales.pipeline')}</h1>
         <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
@@ -257,6 +267,7 @@ export function PipelinePage() {
                   <div
                     key={card.id}
                     draggable
+                    onClick={() => setSelectedId(card.id)}
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/opportunity-id', card.id);
                       e.dataTransfer.setData('text/opportunity-stage', card.stage);
@@ -265,6 +276,7 @@ export function PipelinePage() {
                     className="group cursor-grab rounded-lg border border-border bg-card p-3 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
                   >
                     <div className="text-sm font-medium leading-snug">{card.title}</div>
+                    <RecordActions resource="opportunities" id={card.id} label={card.title} />
                     <div className="mt-0.5 truncate text-xs text-muted-foreground">
                       {card.partner.name}
                     </div>
@@ -320,6 +332,9 @@ export function PipelinePage() {
       )}
 
       <NewOpportunityDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {selectedId && (
+        <OpportunityDrawer id={selectedId} onClose={() => setSelectedId(null)} />
+      )}
     </div>
   );
 }

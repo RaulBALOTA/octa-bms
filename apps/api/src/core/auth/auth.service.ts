@@ -107,6 +107,7 @@ export class AuthService {
         theme: true,
         isSystemAdmin: true,
         memberships: {
+          where: { company: { deletedAt: null, isActive: true } },
           select: {
             isDefault: true,
             company: { select: { id: true, code: true, name: true } },
@@ -120,11 +121,22 @@ export class AuthService {
     const defaultCompany =
       user.memberships.find((m) => m.isDefault)?.company ??
       user.memberships[0]?.company;
+    const memberships = user.isSystemAdmin
+      ? (await this.prisma.company.findMany({
+        where: { deletedAt: null, isActive: true },
+        select: { id: true, code: true, name: true }, orderBy: { code: 'asc' },
+      })).map((company, index) => ({ isDefault: defaultCompany ? company.id === defaultCompany.id : index === 0, company }))
+      : user.memberships;
     const permissions = user.isSystemAdmin
       ? ['*']
       : [...(await this.rbac.getPermissions(user.id, defaultCompany?.id ?? null))];
 
-    return { ...user, permissions };
+    return { ...user, memberships, permissions };
+  }
+
+  /** Public token issuance for SSO flows (OIDC callback). */
+  issueTokensFor(userId: string, email: string) {
+    return this.issueTokens(userId, email);
   }
 
   private async issueTokens(userId: string, email: string) {

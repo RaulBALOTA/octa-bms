@@ -13,6 +13,8 @@ import {
 import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
+import { AiSummary } from '../components/ai';
+import { RecordActions, RecordCreateButton } from '../components/RecordActions';
 import { Column, ListPage, StatusBadge } from '../components/ListPage';
 import {
   Avatar,
@@ -159,6 +161,7 @@ function PartnerDrawer({
                 </div>
               </div>
             </div>
+            <AiSummary entityType="partner" entityId={partnerId} />
           </div>
 
           <Tabs
@@ -223,6 +226,7 @@ function PartnerDrawer({
               </dl>
             )}
 
+            {tab === 'contacts' && <div className="mb-3 flex justify-end"><RecordCreateButton resource="contacts" defaults={{ partnerId }} /></div>}
             {tab === 'contacts' &&
               (partner.contacts.length ? (
                 <ul className="space-y-2">
@@ -250,6 +254,7 @@ function PartnerDrawer({
                             .join(' · ')}
                         </div>
                       </div>
+                      <RecordActions resource="contacts" id={contact.id} label={`${contact.firstName} ${contact.lastName}`} />
                     </li>
                   ))}
                 </ul>
@@ -310,6 +315,7 @@ function PartnerDrawer({
                           <Icon size={9} />
                         </span>
                         <div className="text-sm font-medium">{activity.subject}</div>
+                        <RecordActions resource="activities" id={activity.id} label={activity.subject} />
                         <div className="text-xs text-muted-foreground">
                           {t(`crm.activityType.${activity.type}`)} ·{' '}
                           {fmtDate(activity.activityDate)}

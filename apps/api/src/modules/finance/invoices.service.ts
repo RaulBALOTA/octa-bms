@@ -120,6 +120,7 @@ export class InvoicesService {
         netAmount: (lineNetCents / 100).toFixed(2),
         taxCodeId: line.taxCodeId,
         costCenterId: line.costCenterId,
+        budgetCategory: line.budgetCategory,
       };
     });
 
