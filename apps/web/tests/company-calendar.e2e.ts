@@ -9,6 +9,8 @@ async function setup(page: Page, enabled = true) {
   const rows: CalendarItem[] = []; const writes: { path: string; body: Record<string, unknown>; company: string }[] = [];
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request(); const path = new URL(request.url()).pathname.replace('/api/v1', ''); const method = request.method();
+    // cookie session model: the SPA asks /auth/state before rendering protected routes
+    if (path === '/auth/state') return route.fulfill({ json: { state: 'AUTHENTICATED', csrfToken: 'test-csrf' } });
     if (path === '/auth/me') return route.fulfill({ json: { id: 'owner', email: 'owner@example.com', firstName: 'Test', lastName: 'Owner', isSystemAdmin: true, permissions: [], memberships: [{ isDefault: true, company: { id: 'company', code: 'TEST', name: 'Calendar test company' } }] } });
     if (path === '/business-calendar/capabilities') return route.fulfill({ json: { enabled, domains: ['OPERATIONS', 'FINANCE', 'MEETING'], entityTypes: ['partner'], microsoft: { connected: false }, ai: { connected: false } } });
     if (path === '/business-calendar/entities') return route.fulfill({ json: [{ id: 'partner', label: 'Actual test business partner' }] });

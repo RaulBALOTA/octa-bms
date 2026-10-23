@@ -6,6 +6,7 @@ import {
   Navigate,
   Outlet,
   RouterProvider,
+  useLocation,
 } from 'react-router-dom';
 import '@fontsource-variable/inter';
 import './i18n';
@@ -45,8 +46,10 @@ import { LeavePage } from './pages/LeavePage';
 import { LegalPage } from './pages/LegalPage';
 import { ProcurementPage } from './pages/ProcurementPage';
 import { WorkflowPage } from './pages/WorkflowPage';
-import { LoginPage } from './pages/LoginPage';
-import { OidcCallbackPage } from './pages/OidcCallbackPage';
+import { AcceptInvitePage, ForgotPasswordPage, LoginPage, MfaPage, RecoveryPage, ResetPasswordPage, SetupMfaPage } from './pages/auth/AuthPages';
+import { StepUpDialog } from './pages/auth/components';
+import { SecurityPage } from './pages/SecurityPage';
+import { AdminSecurityPage } from './pages/AdminSecurityPage';
 import { PartnersPage } from './pages/PartnersPage';
 import { PipelinePage } from './pages/PipelinePage';
 import { WinLossPage } from './pages/WinLossPage';
@@ -59,22 +62,41 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * Route guard driven by the server-side state machine. Business routes render only in
+ * AUTHENTICATED; MFA-pending and enrollment-required users are sent to their step.
+ */
 function RequireAuth() {
-  const accessToken = useAuthStore((s) => s.accessToken);
+  const status = useAuthStore((s) => s.status);
   const me = useAuthStore((s) => s.me);
+  const refreshState = useAuthStore((s) => s.refreshState);
   const loadMe = useAuthStore((s) => s.loadMe);
+  const location = useLocation();
+  const next = encodeURIComponent(`${location.pathname}${location.search}`);
 
   useEffect(() => {
-    if (accessToken && !me) void loadMe();
-  }, [accessToken, me, loadMe]);
+    if (status === 'UNKNOWN') void refreshState();
+  }, [status, refreshState]);
+  useEffect(() => {
+    if (status === 'AUTHENTICATED' && !me) void loadMe();
+  }, [status, me, loadMe]);
 
-  if (!accessToken) return <Navigate to="/login" replace />;
+  if (status === 'UNKNOWN') return <div className="p-8 text-center text-sm text-muted-foreground" role="status">…</div>;
+  if (status === 'MFA_PENDING') return <Navigate to={`/auth/mfa?next=${next}`} replace />;
+  if (status === 'MFA_ENROLLMENT_REQUIRED') return <Navigate to={`/auth/setup-mfa?next=${next}`} replace />;
+  if (status !== 'AUTHENTICATED') return <Navigate to={`/login?next=${next}`} replace />;
   return <Outlet />;
 }
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
-  { path: '/oidc', element: <OidcCallbackPage /> },
+  { path: '/auth/mfa', element: <MfaPage /> },
+  { path: '/auth/recovery', element: <RecoveryPage /> },
+  { path: '/auth/setup-mfa', element: <SetupMfaPage /> },
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
+  { path: '/reset-password', element: <ResetPasswordPage /> },
+  { path: '/invite', element: <AcceptInvitePage /> },
+  { path: '/oidc', element: <Navigate to="/" replace /> },
   {
     element: <RequireAuth />,
     children: [
@@ -108,6 +130,8 @@ const router = createBrowserRouter([
           { path: '/workflow', element: <WorkflowPage /> },
           { path: '/bi', element: <BiPage /> },
           { path: '/admin', element: <AdminPage /> },
+          { path: '/admin/security', element: <AdminSecurityPage /> },
+          { path: '/security', element: <SecurityPage /> },
           { path: '/admin/data', element: <DataManagementPage /> },
           { path: '/contracts', element: <ContractsPage /> },
           { path: '/contracts/guarantees', element: <GuaranteesPage /> },
@@ -135,6 +159,7 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <RouterProvider router={router} />
+        <StepUpDialog />
       </ToastProvider>
     </QueryClientProvider>
   </StrictMode>,

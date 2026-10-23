@@ -43,7 +43,7 @@ export function Layout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { me, companyId, setCompany, logout, loadMe } = useAuthStore();
-  const needsCompany = !!me?.isSystemAdmin && me.memberships.length === 0 && !['/group','/group/compare','/admin'].includes(location.pathname);
+  const needsCompany = !!me?.isSystemAdmin && me.memberships.length === 0 && !['/group','/group/compare','/admin','/admin/security','/security'].includes(location.pathname);
   const { theme, setTheme, sidebarCollapsed, toggleSidebar } = useUiStore();
   useEffect(() => { void loadMe(); }, [loadMe]);
   useEffect(() => { void queryClient.invalidateQueries(); }, [companyId, queryClient]);
@@ -280,14 +280,18 @@ export function Layout() {
 
           {/* User */}
           <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+            <Link
+              to="/security"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
+              title={t('nav.security')}
+              aria-label={t('nav.security')}
+            >
               {me?.firstName?.[0]}
               {me?.lastName?.[0]}
-            </div>
+            </Link>
             <button
               onClick={() => {
-                logout();
-                navigate('/login');
+                void logout().then(() => navigate('/login'));
               }}
               className="rounded p-1.5 hover:bg-muted"
               title={t('auth.logout')}

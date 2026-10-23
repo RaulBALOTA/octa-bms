@@ -52,6 +52,8 @@ async function openDocuments(page: Page, isSystemAdmin = true) {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname.replace('/api/v1', '');
+    // cookie session model: the SPA asks /auth/state before rendering protected routes
+    if (path === '/auth/state') return route.fulfill({ json: { state: 'AUTHENTICATED', csrfToken: 'test-csrf' } });
     if (path === '/auth/me') {
       return route.fulfill({ json: {
         id: 'user', email: 'test@example.com', firstName: 'Test', lastName: 'Admin', isSystemAdmin,
@@ -104,7 +106,8 @@ async function openDocuments(page: Page, isSystemAdmin = true) {
       return route.fulfill({ json: file });
     }
     if (path.endsWith('/preview')) {
-      expect(request.headers().authorization).toBe('Bearer test-token');
+      // cookie-only credentials: no bearer token may be attached by the SPA
+      expect(request.headers().authorization).toBeUndefined();
       expect(request.headers()['x-company-id']).toBe('company');
       if (path.includes('/tiff/')) return route.fulfill({ contentType: 'image/tiff', body: Buffer.from(tiffFixture()) });
       if (path.includes('/pdf/')) return route.fulfill({ contentType: 'application/pdf', body: pdfFixture() });

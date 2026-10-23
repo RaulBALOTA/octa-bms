@@ -28,6 +28,8 @@ async function setup(page: Page, editor = true) {
     const path = new URL(request.url()).pathname.replace('/api/v1', '');
     const companyId = request.headers()['x-company-id'] ?? 'first';
     const context = contexts[companyId];
+    // cookie session model: the SPA asks /auth/state before rendering protected routes
+    if (path === '/auth/state') return route.fulfill({ json: { state: 'AUTHENTICATED', csrfToken: 'test-csrf' } });
     if (path === '/auth/me') return route.fulfill({ json: { id: 'user', firstName: 'Budget', lastName: 'User', email: 'budget@example.invalid', isSystemAdmin: false,
       permissions: ['finance.budgets.read', ...(editor ? ['finance.budgets.create', 'finance.budgets.update'] : [])], memberships: [
         { isDefault: true, company: { id: 'first', code: 'FIRST', name: 'First company' } },

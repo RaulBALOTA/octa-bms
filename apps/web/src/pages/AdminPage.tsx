@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plug, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { api, Paged } from '../lib/api';
 import {
   Avatar,
@@ -160,6 +161,10 @@ export function AdminPage() {
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-bold">{t('nav.admin')}</h1>
         <div className="flex-1" />
+        <Link to="/admin/security" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3.5 text-sm font-medium hover:bg-muted">
+          <ShieldCheck size={14} />
+          {t('nav.adminSecurity')}
+        </Link>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus size={14} />
           {t('admin.newUser')}

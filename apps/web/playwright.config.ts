@@ -8,6 +8,7 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:5181',
     channel: process.env.OCTA_TEST_BROWSER_CHANNEL || undefined,
+    launchOptions: { executablePath: process.env.OCTA_TEST_BROWSER_PATH || undefined },
     headless: true,
   },
   webServer: {

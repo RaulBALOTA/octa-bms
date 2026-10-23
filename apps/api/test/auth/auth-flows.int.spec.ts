@@ -55,6 +55,8 @@ describe('#12 session cookie', () => {
     const me = await c.get('/auth/me');
     expect(me.status).toBe(200);
     expect(me.body.email).toBe(w.users.staffA.email);
+    // never cacheable: a cached /auth/state or /auth/me would leak identity or stale state
+    for (const res of [me, await c.get('/auth/state'), await client(t).get('/auth/state')]) expect(res.headers['cache-control']).toBe('no-store');
     expect(JSON.stringify(me.body)).not.toMatch(/passwordHash|tokenHash|encryptedSeed|codeHash/);
   });
 });

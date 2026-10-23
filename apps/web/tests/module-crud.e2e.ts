@@ -51,6 +51,8 @@ async function setup(page: Page, path: string, admin = true) {
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request(); const url = new URL(request.url()); const pathname = url.pathname.replace('/api/v1', ''); const method = request.method(); const scope = request.headers()['x-company-id'];
     if (method === 'GET') reads.push(pathname);
+    // cookie session model: the SPA asks /auth/state before rendering protected routes
+    if (pathname === '/auth/state') return route.fulfill({ json: { state: 'AUTHENTICATED', csrfToken: 'test-csrf' } });
     if (pathname === '/auth/me') return route.fulfill({ json: { id: 'admin', firstName: 'Test', lastName: 'Admin', email: 'admin@example.com', isSystemAdmin: admin, permissions: [], memberships: [{ isDefault: true, company: { id: 'own', name: 'Holding', code: 'HOLD' } }, { isDefault: false, company: { id: 'other', name: 'Subsidiary', code: 'SUB' } }] } });
     if (pathname === '/records/catalog') return route.fulfill({ json: catalog });
     const lookup = /^\/records\/([^/]+)\/lookup\/(.+)$/.exec(pathname);

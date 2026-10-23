@@ -15,6 +15,13 @@ export function configureHttp(app: NestExpressApplication, config: AuthConfig) {
   app.set('trust proxy', config.trustProxy);
   app.disable('x-powered-by');
   app.use(cookieParser());
+  // authenticated/auth-state responses must never be reused from a browser or proxy cache
+  // (a cached "ANONYMOUS" /auth/state, or another user's data on a shared machine)
+  app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+    next();
+  });
   app.use(
     helmet({
       // API responses are JSON/files; the SPA's CSP is served by the web tier (nginx)

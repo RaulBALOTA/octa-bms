@@ -13,6 +13,8 @@ async function setup(page: Page, mode: 'normal' | 'empty' | 'error' | 'positions
     const path = new URL(request.url()).pathname.replace('/api/v1', '');
     const second = request.headers()['x-company-id'] === 'second';
     if (path === '/hr/org-chart/versions') return route.fulfill({ json: [] });
+    // cookie session model: the SPA asks /auth/state before rendering protected routes
+    if (path === '/auth/state') return route.fulfill({ json: { state: 'AUTHENTICATED', csrfToken: 'test-csrf' } });
     if (path === '/auth/me') return route.fulfill({ json: {
       id: 'member', firstName: 'HR', lastName: 'Member', email: 'hr@example.com', isSystemAdmin: false,
       permissions: ['hr.employees.read', 'hr.recruitment.read', ...(editor ? ['hr.employees.update', 'hr.recruitment.create'] : [])], memberships: [

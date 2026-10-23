@@ -34,6 +34,8 @@ async function setup(page: Page, isSystemAdmin = true, empty = false) {
     const scope = request.headers()['x-company-id'];
     if (path === '/records/catalog') return route.fulfill({ json: [] });
     if (method !== 'GET') mutations.push({ path, method, companyId: scope, body: request.postData() ? request.postDataJSON() : null });
+    // cookie session model: the SPA asks /auth/state before rendering protected routes
+    if (path === '/auth/state') return route.fulfill({ json: { state: 'AUTHENTICATED', csrfToken: 'test-csrf' } });
     if (path === '/auth/me') return route.fulfill({ json: { id: 'admin', email: 'admin@example.com', firstName: 'Test', lastName: 'Admin', isSystemAdmin,
       permissions: ['corporate.goals.read', 'admin.masterdata.read'],
       memberships: companies.filter((row) => row.isActive).map((row, index) => ({ isDefault: index === 0, company: { id: row.id, code: row.code, name: row.name } })),
