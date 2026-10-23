@@ -1143,8 +1143,6 @@
     "consentUntil": "Consent valid until",
     "access": "Access",
     "empty": "No bank connected yet. Connect Qonto or any other PSD2 bank to import balances and transactions.",
-    "disabledTitle": "Bank connections are not enabled",
-    "disabledHint": "An administrator must apply prisma/sql/add_bank_connections.sql, set BANKING_ENABLED=true and BANKING_ENCRYPTION_KEY in apps/api/.env and restart the API. See docs/banking.md.",
     "transactions": "Bank transactions",
     "allAccounts": "All accounts",
     "bookingDate": "Booked",
@@ -1153,6 +1151,14 @@
     "account": "Account",
     "amount": "Amount",
     "consentDeclined": "Bank consent was not granted",
+    "setup": {
+      "title": "Bank connections are not ready yet",
+      "flag": "The feature is switched off on the server: set BANKING_ENABLED=true in apps/api/.env (or your server settings) and restart the API.",
+      "key": "The encryption key is missing or invalid: set BANKING_ENCRYPTION_KEY to the output of “openssl rand -base64 32” and restart the API.",
+      "noRead": "Your role cannot see bank connections yet. An administrator runs “pnpm banking:setup --apply” in apps/api (adds the banking permissions to existing roles); then reload this page.",
+      "viewOnlyTitle": "View only",
+      "noCreate": "Connecting a bank needs the permission finance.banking.create (Finance Manager or System Admin). Ask an administrator, then reload this page."
+    },
     "providers": {
       "QONTO": {
         "name": "Qonto",

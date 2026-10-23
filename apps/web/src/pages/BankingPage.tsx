@@ -3,7 +3,7 @@ import { Landmark, Loader2, Plus, RefreshCw, ShieldCheck, Unplug } from 'lucide-
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { Column, ListPage, StatusBadge } from '../components/ListPage';
 import { FinanceNav } from '../components/FinanceNav';
 import { Button, Dialog, Field, SelectInput, TextInput, useToast } from '../components/ui';
@@ -266,6 +266,18 @@ function ConnectionCard({ connection }: { connection: Connection }) {
   );
 }
 
+/** Says exactly why "Connect bank" is unavailable instead of hiding it silently. */
+function SetupNotice({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div role="status" className="mb-6 rounded-xl border border-warning/40 bg-warning/5 p-4 text-sm">
+      <p className="mb-1.5 font-semibold">{title}</p>
+      <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+        {items.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    </div>
+  );
+}
+
 export function BankingPage() {
   const { t, i18n } = useTranslation();
   const money = useMoney();
@@ -316,12 +328,23 @@ export function BankingPage() {
         )}
       </div>
 
-      {caps.error && <p role="alert" className="mb-3 text-sm text-destructive">{caps.error.message}</p>}
+      {caps.error && (
+        <SetupNotice
+          title={t('banking.setup.title')}
+          items={[caps.error instanceof ApiError && caps.error.status === 403 ? t('banking.setup.noRead') : caps.error.message]}
+        />
+      )}
       {caps.data && !ready && (
-        <div className="mb-6 rounded-xl border border-border bg-card p-5 text-sm">
-          <p className="mb-1 font-semibold">{t('banking.disabledTitle')}</p>
-          <p className="text-muted-foreground">{t('banking.disabledHint')}</p>
-        </div>
+        <SetupNotice
+          title={t('banking.setup.title')}
+          items={[
+            !caps.data.enabled && t('banking.setup.flag'),
+            !caps.data.encryptionReady && t('banking.setup.key'),
+          ].filter((item): item is string => !!item)}
+        />
+      )}
+      {ready && !hasPermission(me, 'finance.banking.create') && (
+        <SetupNotice title={t('banking.setup.viewOnlyTitle')} items={[t('banking.setup.noCreate')]} />
       )}
 
       {ready && (
