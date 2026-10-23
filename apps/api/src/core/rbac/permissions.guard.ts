@@ -30,9 +30,10 @@ export class PermissionsGuard implements CanActivate {
 
     const req = context
       .switchToHttp()
-      .getRequest<Request & { user: AuthUser }>();
+      .getRequest<Request & { user: AuthUser; preAuth?: unknown }>();
     const user = req.user;
-    if (!user) return false;
+    // pre-auth requests may only reach @AllowPreAuth routes, which declare no permissions
+    if (!user) return Boolean(req.preAuth) && !required?.length;
 
     // Always resolve the effective set (cached) so downstream handlers can
     // apply row/field-level filtering via user.permissions.

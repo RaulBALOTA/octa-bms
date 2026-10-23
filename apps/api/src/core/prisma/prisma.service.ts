@@ -50,6 +50,7 @@ export class PrismaService
   extends PrismaClient
   implements OnModuleInit, OnModuleDestroy
 {
+  private readonly emailHook = this.registerEmailNormalization();
   /** Extended client applying soft-delete semantics. Use for business queries. */
   readonly client = this.buildExtendedClient();
 
@@ -59,6 +60,31 @@ export class PrismaService
 
   async onModuleDestroy() {
     await this.$disconnect();
+  }
+
+  /**
+   * Keeps users.emailNormalized (unique, case-insensitive identity key) in sync for
+   * every write path, including generic record management and seeds.
+   */
+  private registerEmailNormalization() {
+    this.$use(async (params, next) => {
+      if (params.model === 'User' && ['create', 'update', 'upsert', 'updateMany', 'createMany'].includes(params.action)) {
+        const apply = (data: Record<string, unknown> | undefined) => {
+          if (data && typeof data.email === 'string') {
+            const email = data.email.trim();
+            data.email = email;
+            data.emailNormalized = email.normalize('NFKC').toLowerCase();
+          }
+        };
+        const args = params.args as { data?: unknown; create?: Record<string, unknown>; update?: Record<string, unknown> };
+        if (Array.isArray(args.data)) args.data.forEach((d) => apply(d as Record<string, unknown>));
+        else apply(args.data as Record<string, unknown> | undefined);
+        apply(args.create);
+        apply(args.update);
+      }
+      return next(params);
+    });
+    return true;
   }
 
   private buildExtendedClient() {

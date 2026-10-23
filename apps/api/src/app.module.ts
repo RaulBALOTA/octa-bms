@@ -8,7 +8,7 @@ import { LoggerModule } from 'nestjs-pino';
 
 import { PrismaModule } from './core/prisma/prisma.module';
 import { AuthModule } from './core/auth/auth.module';
-import { JwtAuthGuard } from './core/auth/jwt-auth.guard';
+import { CsrfGuard, RecentAuthGuard, SessionAuthGuard } from './core/security/guards';
 import { CompanyContextGuard } from './core/auth/company-context.guard';
 import { PermissionsGuard } from './core/rbac/permissions.guard';
 import { AuditModule } from './core/audit/audit.module';
@@ -47,7 +47,18 @@ import { CalendarModule } from './modules/business-calendar/calendar.module';
           process.env.NODE_ENV !== 'production'
             ? { target: 'pino-pretty', options: { singleLine: true } }
             : undefined,
-        redact: ['req.headers.authorization', 'req.headers.cookie'],
+        // never log credentials, cookies, CSRF tokens or bodies (pino-http logs no bodies)
+        redact: {
+          paths: [
+            'req.headers.authorization',
+            'req.headers.cookie',
+            'req.headers["x-csrf-token"]',
+            'res.headers["set-cookie"]',
+            '*.password', '*.currentPassword', '*.newPassword', '*.code', '*.token',
+            '*.recoveryCodes', '*.manualKey', '*.qrSvg', '*.csrfToken', '*.secret',
+          ],
+          censor: '[redacted]',
+        },
       },
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
@@ -81,9 +92,12 @@ import { CalendarModule } from './modules/business-calendar/calendar.module';
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // order matters: authenticate → CSRF → company context → permissions → step-up
+    { provide: APP_GUARD, useExisting: SessionAuthGuard },
+    { provide: APP_GUARD, useExisting: CsrfGuard },
     { provide: APP_GUARD, useClass: CompanyContextGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useExisting: RecentAuthGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })

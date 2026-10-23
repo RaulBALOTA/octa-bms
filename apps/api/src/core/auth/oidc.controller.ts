@@ -1,36 +1,45 @@
 import {
   Controller,
   Get,
+  Inject,
   Logger,
   Query,
+  Req,
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthService } from './auth.service';
+import { AUTH_CONFIG, type AuthConfig } from '../security/auth-config';
+import { AuthService, normalizeEmail } from '../security/auth.service';
+import { clearOidcStateCookie, readCookie, setOidcStateCookie } from '../security/cookies';
+import { safeEqual } from '../security/crypto';
+import { SecurityAuditService } from '../security/security-audit.service';
 import { Public } from './decorators';
 
 /**
  * Azure Entra ID single sign-on (OIDC authorization-code flow).
  * Activates when ENTRA_TENANT_ID / ENTRA_CLIENT_ID / ENTRA_CLIENT_SECRET are
- * configured. Users are provisioned on first login (matched by Entra object
- * id, falling back to email) and receive the same JWT pair as local login.
+ * configured. A successful Entra login counts as the *primary* factor only: it goes
+ * through the same MFA decision as password login and ends in the same cookie session
+ * (no tokens in URLs). State + nonce live in a short-lived HttpOnly cookie, so the flow
+ * works across API instances. Unknown Entra users are provisioned only when
+ * ENTRA_AUTO_PROVISION=true (default: they must be invited first).
  */
 @ApiTags('auth')
 @Controller('auth/oidc')
 export class OidcController {
   private readonly logger = new Logger(OidcController.name);
   private jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
-  // short-lived anti-CSRF state store (single instance; Redis when scaled out)
-  private readonly pendingStates = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly auth: AuthService,
+    private readonly audit: SecurityAuditService,
+    @Inject(AUTH_CONFIG) private readonly authConfig: AuthConfig,
   ) {}
 
   private get config() {
@@ -44,7 +53,7 @@ export class OidcController {
       clientSecret,
       authority: `https://login.microsoftonline.com/${tenantId}`,
       redirectUri: `${process.env.API_URL ?? 'http://localhost:3000'}/api/v1/auth/oidc/callback`,
-      appUrl: process.env.APP_URL ?? 'http://localhost:5180',
+      appUrl: this.authConfig.publicOrigin,
     };
   }
 
@@ -65,11 +74,8 @@ export class OidcController {
       });
     }
     const state = randomBytes(24).toString('base64url');
-    this.pendingStates.set(state, Date.now());
-    // prune states older than 10 minutes
-    for (const [key, created] of this.pendingStates) {
-      if (Date.now() - created > 600_000) this.pendingStates.delete(key);
-    }
+    const nonce = randomBytes(24).toString('base64url');
+    setOidcStateCookie(res, this.authConfig, `${state}.${nonce}`);
 
     const params = new URLSearchParams({
       client_id: config.clientId,
@@ -78,6 +84,7 @@ export class OidcController {
       response_mode: 'query',
       scope: 'openid profile email',
       state,
+      nonce,
     });
     res.redirect(`${config.authority}/oauth2/v2.0/authorize?${params}`);
   }
@@ -88,122 +95,100 @@ export class OidcController {
     @Query('code') code: string,
     @Query('state') state: string,
     @Query('error') error: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
     const config = this.config;
     if (!config) throw new UnauthorizedException('SSO not configured');
+    const stored = readCookie(req, this.authConfig.cookie.oidcState) ?? '';
+    clearOidcStateCookie(res, this.authConfig);
+    const [expectedState, expectedNonce] = stored.split('.');
 
     if (error || !code) {
-      this.logger.warn(`OIDC callback error: ${error}`);
+      this.logger.warn('OIDC callback returned an error');
       return res.redirect(`${config.appUrl}/login?sso=failed`);
     }
-    if (!state || !this.pendingStates.delete(state)) {
+    if (!state || !expectedState || !safeEqual(state, expectedState)) {
       return res.redirect(`${config.appUrl}/login?sso=state`);
     }
 
-    // exchange the code for tokens
-    const tokenResponse = await fetch(
-      `${config.authority}/oauth2/v2.0/token`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: config.clientId,
-          client_secret: config.clientSecret,
-          grant_type: 'authorization_code',
-          code,
-          redirect_uri: config.redirectUri,
-        }),
-      },
-    );
+    const tokenResponse = await fetch(`${config.authority}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: config.redirectUri,
+      }),
+    });
     if (!tokenResponse.ok) {
       this.logger.warn(`OIDC token exchange failed: ${tokenResponse.status}`);
       return res.redirect(`${config.appUrl}/login?sso=exchange`);
     }
     const tokens = (await tokenResponse.json()) as { id_token: string };
 
-    // verify the id_token signature against the tenant's JWKS
-    this.jwks ??= createRemoteJWKSet(
-      new URL(`${config.authority}/discovery/v2.0/keys`),
-    );
-    let claims: {
-      oid?: string;
-      email?: string;
-      preferred_username?: string;
-      name?: string;
-      given_name?: string;
-      family_name?: string;
-    };
+    this.jwks ??= createRemoteJWKSet(new URL(`${config.authority}/discovery/v2.0/keys`));
+    let claims: { oid?: string; email?: string; preferred_username?: string; name?: string; given_name?: string; family_name?: string; nonce?: string };
     try {
-      const verified = await jwtVerify(tokens.id_token, this.jwks, {
-        issuer: `${config.authority}/v2.0`,
-        audience: config.clientId,
-      });
+      const verified = await jwtVerify(tokens.id_token, this.jwks, { issuer: `${config.authority}/v2.0`, audience: config.clientId });
       claims = verified.payload as typeof claims;
-    } catch (verifyError) {
-      this.logger.warn(`OIDC id_token verification failed: ${String(verifyError)}`);
+    } catch {
+      this.logger.warn('OIDC id_token verification failed');
+      return res.redirect(`${config.appUrl}/login?sso=verify`);
+    }
+    if (!claims.nonce || !expectedNonce || !safeEqual(claims.nonce, expectedNonce)) {
       return res.redirect(`${config.appUrl}/login?sso=verify`);
     }
 
-    const email = (claims.email ?? claims.preferred_username ?? '').toLowerCase();
-    if (!email || !claims.oid) {
+    const email = normalizeEmail(claims.email ?? claims.preferred_username ?? '');
+    if (!email || !claims.oid) return res.redirect(`${config.appUrl}/login?sso=claims`);
+
+    let user = await this.prisma.user.findFirst({ where: { OR: [{ entraObjectId: claims.oid }, { emailNormalized: email }, { email }], deletedAt: null } });
+    if (user?.entraObjectId && user.entraObjectId !== claims.oid) {
+      await this.audit.record({ action: 'auth.oidc', outcome: 'denied', targetUserId: user.id, req, context: { reason: 'oid_mismatch' } });
       return res.redirect(`${config.appUrl}/login?sso=claims`);
     }
-
-    // provision or link the user
-    let user = await this.prisma.user.findFirst({
-      where: { OR: [{ entraObjectId: claims.oid }, { email }], deletedAt: null },
-    });
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          email,
-          entraObjectId: claims.oid,
-          firstName: claims.given_name ?? claims.name?.split(' ')[0] ?? 'New',
-          lastName:
-            claims.family_name ??
-            claims.name?.split(' ').slice(1).join(' ') ??
-            'User',
-          displayName: claims.name,
-        },
-      });
-      // membership in the first company + base EMPLOYEE role, so a fresh SSO
-      // user can log in and sees the self-service scope only
-      const company = await this.prisma.company.findFirst({
-        where: { deletedAt: null },
-      });
-      const employeeRole = await this.prisma.role.findUnique({
-        where: { code: 'EMPLOYEE' },
-      });
-      if (company) {
-        await this.prisma.companyMembership.create({
-          data: { userId: user.id, companyId: company.id, isDefault: true },
-        });
-        if (employeeRole) {
-          await this.prisma.userRole.create({
-            data: { userId: user.id, roleId: employeeRole.id, companyId: company.id },
-          });
-        }
+      if (!this.authConfig.oidcAutoProvision) {
+        await this.audit.record({ action: 'auth.oidc', outcome: 'denied', req, context: { reason: 'not_invited' } });
+        return res.redirect(`${config.appUrl}/login?sso=not_invited`);
       }
-      this.logger.log(`provisioned SSO user ${email}`);
+      user = await this.provision(email, claims);
     } else if (!user.entraObjectId) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { entraObjectId: claims.oid },
-      });
+      user = await this.prisma.user.update({ where: { id: user.id }, data: { entraObjectId: claims.oid } });
     }
-    if (!user.isActive) {
+    if (!user.isActive || user.status !== 'ACTIVE') {
+      await this.audit.record({ action: 'auth.oidc', outcome: 'denied', targetUserId: user.id, req, context: { reason: 'inactive' } });
       return res.redirect(`${config.appUrl}/login?sso=inactive`);
     }
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
 
-    const pair = await this.auth.issueTokensFor(user.id, user.email);
-    // hand tokens to the SPA via URL fragment (never sent to any server)
-    res.redirect(
-      `${config.appUrl}/oidc#accessToken=${encodeURIComponent(pair.accessToken)}&refreshToken=${encodeURIComponent(pair.refreshToken)}`,
-    );
+    const result = await this.auth.completePrimaryAuth(user, 'oidc', req, res);
+    const next = result.status === 'MFA_PENDING' ? '/auth/mfa' : result.status === 'MFA_ENROLLMENT_REQUIRED' ? '/auth/setup-mfa' : '/';
+    return res.redirect(`${config.appUrl}${next}`);
+  }
+
+  private async provision(email: string, claims: { oid?: string; name?: string; given_name?: string; family_name?: string }) {
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        emailNormalized: email,
+        entraObjectId: claims.oid,
+        emailVerifiedAt: new Date(),
+        firstName: claims.given_name ?? claims.name?.split(' ')[0] ?? 'New',
+        lastName: claims.family_name ?? claims.name?.split(' ').slice(1).join(' ') ?? 'User',
+        displayName: claims.name,
+      },
+    });
+    // membership in the first company + base EMPLOYEE role (self-service scope only)
+    const company = await this.prisma.company.findFirst({ where: { deletedAt: null }, orderBy: { createdAt: 'asc' } });
+    const employeeRole = await this.prisma.role.findUnique({ where: { code: 'EMPLOYEE' } });
+    if (company) {
+      await this.prisma.companyMembership.create({ data: { userId: user.id, companyId: company.id, isDefault: true } });
+      if (employeeRole) await this.prisma.userRole.create({ data: { userId: user.id, roleId: employeeRole.id, companyId: company.id } });
+    }
+    this.logger.log('provisioned SSO user');
+    return user;
   }
 }

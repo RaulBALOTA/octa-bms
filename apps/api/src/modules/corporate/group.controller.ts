@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { AuthUser, CurrentUser } from '../../core/auth/decorators';
+import { AuthUser, CurrentUser, RequirePermission } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 const OPEN_STATUSES = ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] as const;
@@ -51,6 +51,8 @@ export class GroupController {
   }
 
   @Get('overview')
+  // group financial KPIs: same audience as the corporate dashboard (docs/10 matrix)
+  @RequirePermission('corporate.dashboard.read')
   async overview(@CurrentUser() user: AuthUser) {
     const companies = await this.prisma.company.findMany({
       where: {

@@ -30,9 +30,10 @@ export class CompanyContextGuard implements CanActivate {
 
     const req = context
       .switchToHttp()
-      .getRequest<Request & { user?: AuthUser }>();
+      .getRequest<Request & { user?: AuthUser; preAuth?: unknown }>();
     const user = req.user;
-    if (!user) return false;
+    // pre-auth (MFA pending) requests carry no user and no company context
+    if (!user) return Boolean(req.preAuth);
 
     const requested = req.header('X-Company-Id');
 

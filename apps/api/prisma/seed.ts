@@ -21,7 +21,7 @@ const MODULES: Record<string, string[]> = {
   communication: ['meetings', 'messages', 'mail'],
   workflow: ['definitions', 'tasks'],
   bi: ['dashboards', 'reports'],
-  identity: ['users', 'roles', 'groups', 'apikeys'],
+  identity: ['users', 'roles', 'groups', 'apikeys', 'security'],
   admin: ['masterdata', 'audit', 'settings'],
 };
 const ACTIONS = ['read', 'create', 'update', 'delete', 'approve', 'export'];
@@ -149,7 +149,7 @@ async function main() {
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password || password.length < 12) {
         throw new Error('Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD (at least 12 characters) to create your own first admin account. Demo data is disabled.');
       }
-      const user = await prisma.user.create({ data: { email, firstName: 'Administrator', lastName: '', isSystemAdmin: true, passwordHash: await argon2.hash(password) } });
+      const user = await prisma.user.create({ data: { email, emailNormalized: email, firstName: 'Administrator', lastName: '', isSystemAdmin: true, passwordHash: await argon2.hash(password, { type: argon2.argon2id }), credentialUpdatedAt: new Date() } });
       await prisma.userRole.create({ data: { userId: user.id, roleId: adminRole.id } });
     }
     console.log('Reference data and admin access ready. No demo companies or business records were created.');
@@ -230,6 +230,7 @@ async function main() {
       update: {},
       create: {
         email,
+        emailNormalized: email,
         firstName,
         lastName,
         displayName: `${firstName} ${lastName}`,
