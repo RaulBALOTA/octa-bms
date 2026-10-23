@@ -411,6 +411,13 @@ model Company {
   positionPlans    PositionPlan[]
   orgChartVersions OrgChartVersion[]
   staffingBudgets  StaffingBudgetScenario[]
+  workSchedules      WorkSchedule[]
+  timeRecords        TimeRecord[]
+  projectTimeEntries ProjectTimeEntry[]
+  timesheets         Timesheet[]
+  timeAllocations    TimeAllocation[]
+  pmoProjects        PmoProject[]
+  pmoSyncRuns        PmoSyncRun[]
 
   @@map("companies")
 }
@@ -1469,6 +1476,11 @@ model Employee {
   managedProposals   Proposal[]
   ownedContracts     Contract[]
   cvProfile          CvProfile?
+  workScheduleAssignments EmployeeWorkSchedule[]
+  timeRecords        TimeRecord[]
+  projectTimeEntries ProjectTimeEntry[]
+  timesheets         Timesheet[]
+  timeAllocations    TimeAllocation[]
 
   @@unique([companyId, employeeNumber])
   @@index([companyId, status])
@@ -1720,6 +1732,209 @@ model LeaveBalance {
 
   @@unique([employeeId, year])
   @@map("leave_balances")
+}
+
+// ---------------------------------------------------------------------
+// Working time — schedules, attendance, project hours, weekly timesheets,
+// capacity planning and the PMO time-tracking connector.
+// Calendar days are stored as DATE (no time zone).
+// ---------------------------------------------------------------------
+
+enum TimeRecordKind {
+  OFFICE
+  HOME_OFFICE
+  ON_SITE
+  BUSINESS_TRIP
+}
+
+enum TimeEntrySource {
+  BMS
+  PMO
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+/// Working-time model (Arbeitszeitmodell): target minutes per weekday.
+model WorkSchedule {
+  id           String   @id @default(cuid())
+  companyId    String
+  code         String
+  name         String
+  /// Target minutes Monday..Sunday (index 0 = Monday).
+  dailyMinutes Int[]
+  coreStart    String? // HH:mm, informational core time
+  coreEnd      String?
+  isDefault    Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company     Company                @relation(fields: [companyId], references: [id])
+  assignments EmployeeWorkSchedule[]
+
+  @@unique([companyId, code])
+  @@map("work_schedules")
+}
+
+model EmployeeWorkSchedule {
+  id         String    @id @default(cuid())
+  employeeId String
+  scheduleId String
+  validFrom  DateTime  @db.Date
+  validTo    DateTime? @db.Date
+  createdAt  DateTime  @default(now())
+
+  employee Employee     @relation(fields: [employeeId], references: [id])
+  schedule WorkSchedule @relation(fields: [scheduleId], references: [id])
+
+  @@index([employeeId, validFrom])
+  @@map("employee_work_schedules")
+}
+
+/// Attendance (Arbeitszeiterfassung): one row per work block; endAt null = clocked in.
+model TimeRecord {
+  id           String         @id @default(cuid())
+  companyId    String
+  employeeId   String
+  date         DateTime       @db.Date
+  startAt      DateTime
+  endAt        DateTime?
+  breakMinutes Int            @default(0)
+  kind         TimeRecordKind @default(OFFICE)
+  note         String?
+  createdById  String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([companyId, date])
+  @@index([employeeId, date])
+  @@map("time_records")
+}
+
+/// Hours booked on an EPCM project — entered in BMS or mirrored from the PMO app.
+model ProjectTimeEntry {
+  id          String          @id @default(cuid())
+  companyId   String
+  employeeId  String
+  date        DateTime        @db.Date
+  projectCode String
+  projectName String?
+  taskRef     String?
+  minutes     Int
+  billable    Boolean         @default(true)
+  description String?
+  source      TimeEntrySource @default(BMS)
+  externalId  String?
+  syncedAt    DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([companyId, source, externalId])
+  @@index([companyId, date])
+  @@index([employeeId, date])
+  @@index([companyId, projectCode])
+  @@map("project_time_entries")
+}
+
+/// Weekly timesheet (Mon–Sun) carrying the approval state and a totals snapshot.
+model Timesheet {
+  id             String          @id @default(cuid())
+  companyId      String
+  employeeId     String
+  weekStart      DateTime        @db.Date
+  status         TimesheetStatus @default(DRAFT)
+  targetMinutes  Int             @default(0)
+  workedMinutes  Int             @default(0)
+  projectMinutes Int             @default(0)
+  violations     Json?
+  submittedAt    DateTime?
+  submittedById  String?
+  decidedAt      DateTime?
+  decidedById    String?
+  decisionNote   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, weekStart])
+  @@index([companyId, status])
+  @@map("timesheets")
+}
+
+/// Capacity plan: hours per employee, project and ISO week.
+model TimeAllocation {
+  id             String   @id @default(cuid())
+  companyId      String
+  employeeId     String
+  projectCode    String
+  projectName    String?
+  weekStart      DateTime @db.Date
+  plannedMinutes Int
+  note           String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, projectCode, weekStart])
+  @@index([companyId, weekStart])
+  @@map("time_allocations")
+}
+
+/// Project register mirrored from the PMO app (read-only in BMS).
+model PmoProject {
+  id         String   @id @default(cuid())
+  companyId  String
+  externalId String
+  code       String
+  name       String
+  status     String?
+  isActive   Boolean  @default(true)
+  syncedAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, externalId])
+  @@index([companyId, code])
+  @@map("pmo_projects")
+}
+
+model PmoSyncRun {
+  id            String    @id @default(cuid())
+  companyId     String
+  trigger       String // MANUAL | SCHEDULED | PUSH
+  status        String // RUNNING | SUCCEEDED | FAILED
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  windowFrom    DateTime? @db.Date
+  fetched       Int       @default(0)
+  created       Int       @default(0)
+  updated       Int       @default(0)
+  removed       Int       @default(0)
+  skipped       Int       @default(0)
+  unmatched     Json?
+  error         String?
+  triggeredById String?
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, startedAt])
+  @@map("pmo_sync_runs")
 }
 
 model BusinessTrip {

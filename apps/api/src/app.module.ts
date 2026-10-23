@@ -36,6 +36,7 @@ import { BiModule } from './modules/bi/bi.module';
 import { AiModule } from './modules/ai/ai.module';
 import { RecordsModule } from './modules/records/records.module';
 import { CalendarModule } from './modules/business-calendar/calendar.module';
+import { WorkingTimeModule } from './modules/working-time/working-time.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { CalendarModule } from './modules/business-calendar/calendar.module';
     AiModule,
     RecordsModule,
     CalendarModule,
+    WorkingTimeModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

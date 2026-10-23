@@ -77,6 +77,10 @@ invoices with server-side VAT totals, notification center + daily expiry/birthda
 scanners, global search, and the web shell (login, dashboard, CRM/HR/contracts/
 finance lists, dark mode, DE/EN).
 
+**Working time** ([docs/working-time.md](docs/working-time.md)): attendance with clock in/out,
+work schedules, ArbZG checks, flexitime balance, weekly timesheet approval, capacity
+planning, and a two-way connection to the PMO app's project time tracking.
+
 **Designed, scheduled by roadmap (docs/12):** sales pipeline & proposals, workflow
 designer, DMS with OCR, knowledge base, Graph/Teams integration, DATEV export,
 BI dashboards, AI suite, Entra SSO. Nav items for these show a roadmap placeholder.

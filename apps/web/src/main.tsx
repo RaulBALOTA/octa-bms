@@ -52,6 +52,11 @@ import { PipelinePage } from './pages/PipelinePage';
 import { WinLossPage } from './pages/WinLossPage';
 import { useAuthStore } from './stores/auth';
 import { DataManagementPage } from './pages/DataManagementPage';
+import { MyTimePage } from './features/working-time/MyTimePage';
+import { TeamTimePage } from './features/working-time/TeamTimePage';
+import { PlanningPage } from './features/working-time/PlanningPage';
+import { SchedulesPage } from './features/working-time/SchedulesPage';
+import { PmoIntegrationPage } from './features/working-time/PmoIntegrationPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -93,6 +98,11 @@ const router = createBrowserRouter([
           { path: '/hr/recruitment', element: <RecruitmentPage /> },
           { path: '/hr/org-chart', element: <OrgChartPage /> },
           { path: '/hr/staffing-budgets', element: <StaffingBudgetPage /> },
+          { path: '/time', element: <MyTimePage /> },
+          { path: '/time/team', element: <TeamTimePage /> },
+          { path: '/time/planning', element: <PlanningPage /> },
+          { path: '/time/schedules', element: <SchedulesPage /> },
+          { path: '/time/pmo', element: <PmoIntegrationPage /> },
           { path: '/assets', element: <AssetsPage /> },
           { path: '/assets/:id', element: <AssetsPage /> },
           { path: '/corporate', element: <CorporatePage /> },

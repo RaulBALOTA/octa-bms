@@ -13,6 +13,7 @@ const MODULES: Record<string, string[]> = {
   contracts: ['contracts', 'guarantees', 'insurance'],
   finance: ['invoices', 'payments', 'budgets', 'datev'],
   hr: ['employees', 'leave', 'recruitment', 'reviews', 'trainings'],
+  time: ['records', 'timesheets', 'planning', 'schedules', 'integration'],
   legal: ['cases', 'gdpr', 'compliance', 'whistleblower'],
   procurement: ['requests', 'orders', 'evaluations'],
   assets: ['assets', 'licenses'],
@@ -87,11 +88,13 @@ async function main() {
   ]);
   const hrRole = await seedRole('HR_MANAGER', 'HR Manager', [
     /^calendar\.items\.(read|create|update)$/,
-    /^hr\./, /^communication\./,
+    /^hr\./, /^time\./, /^communication\./,
   ]);
   const employeeRole = await seedRole('EMPLOYEE', 'Employee (self-service)', [
     /^calendar\.items\.(read|create|update)$/,
     /^hr\.leave\.(read|create)$/, /^knowledge\.articles\.read$/,
+    /^time\.records\.(read|create|update|delete)$/, /^time\.timesheets\.(read|create)$/,
+    /^time\.planning\.read$/,
     /^hr\.employees\.read$/, /^workflow\.tasks\.(read|approve)$/,
     /^communication\.meetings\.(read|create|update)$/,
     /^communication\.messages\.(read|create)$/,

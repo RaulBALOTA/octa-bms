@@ -11,6 +11,7 @@ export const PERMISSION_MODULES = {
   contracts: ['contracts', 'guarantees', 'insurance'],
   finance: ['invoices', 'payments', 'budgets', 'datev'],
   hr: ['employees', 'leave', 'recruitment', 'reviews', 'trainings'],
+  time: ['records', 'timesheets', 'planning', 'schedules', 'integration'],
   legal: ['cases', 'gdpr', 'compliance', 'whistleblower'],
   procurement: ['requests', 'orders', 'evaluations'],
   assets: ['assets', 'licenses'],

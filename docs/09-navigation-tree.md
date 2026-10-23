@@ -68,7 +68,8 @@ Data-driven (served by API, filtered by permissions). German labels in parenthes
    ├─ Certificates (Zertifikate) · Training (Schulungen)
    ├─ Leave (Urlaub & Abwesenheiten) · Leave Calendar
    ├─ Business Trips (Dienstreisen)
-   ├─ Timesheet Summary (from PMO)
+   ├─ Working time (/time): My time · Team & approvals · Capacity planning ·
+   │    Work schedules · PMO connection — see docs/working-time.md
    ├─ Recruitment: Openings · Applicants · Interviews
    ├─ Performance Reviews (Mitarbeitergespräche)
    ├─ Onboarding
