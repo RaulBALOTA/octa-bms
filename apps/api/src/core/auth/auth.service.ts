@@ -10,6 +10,7 @@ import { RbacService } from '../rbac/rbac.service';
 
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MINUTES = 15;
+const REUSE_GRACE_MS = 30_000;
 
 @Injectable()
 export class AuthService {
@@ -24,6 +25,9 @@ export class AuthService {
       where: { email: email.toLowerCase(), deletedAt: null },
     });
     if (!user || !user.isActive || !user.passwordHash) {
+      // equalize timing with the password check so response latency does not
+      // reveal which emails have an account
+      await argon2.verify(await this.dummyHash(), password).catch(() => false);
       throw new UnauthorizedException('Invalid credentials');
     }
     if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -65,18 +69,31 @@ export class AuthService {
     }
 
     const tokenHash = this.hash(refreshToken);
-    const stored = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
+    // rotation: revoke the used token atomically, so two concurrent requests
+    // with the same token cannot both obtain a new pair
+    const now = new Date();
+    const rotated = await this.prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null, expiresAt: { gt: now } },
+      data: { revokedAt: now },
     });
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+    if (rotated.count !== 1) {
+      const stored = await this.prisma.refreshToken.findUnique({
+        where: { tokenHash },
+      });
+      // A token presented again well after its rotation means it was copied:
+      // revoke every session of that user so the stolen chain dies too. The
+      // grace window tolerates two browser tabs refreshing at the same time.
+      if (
+        stored?.revokedAt &&
+        now.getTime() - stored.revokedAt.getTime() > REUSE_GRACE_MS
+      ) {
+        await this.prisma.refreshToken.updateMany({
+          where: { userId: stored.userId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+      }
       throw new UnauthorizedException('Refresh token revoked or expired');
     }
-
-    // rotation: revoke the used token
-    await this.prisma.refreshToken.update({
-      where: { tokenHash },
-      data: { revokedAt: new Date() },
-    });
 
     const user = await this.prisma.user.findFirst({
       where: { id: payload.sub, isActive: true, deletedAt: null },
@@ -157,6 +174,13 @@ export class AuthService {
       },
     });
     return { accessToken, refreshToken };
+  }
+
+  private dummyHashPromise: Promise<string> | null = null;
+
+  private dummyHash(): Promise<string> {
+    this.dummyHashPromise ??= argon2.hash(randomUUID());
+    return this.dummyHashPromise;
   }
 
   private hash(token: string): string {

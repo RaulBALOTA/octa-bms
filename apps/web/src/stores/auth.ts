@@ -37,6 +37,11 @@ interface AuthState {
   logout: () => void;
 }
 
+// One refresh at a time: refresh tokens rotate on use, so parallel requests
+// that all hit 401 must share a single refresh instead of racing with the
+// same (soon revoked) token.
+let refreshInFlight: Promise<boolean> | null = null;
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -78,21 +83,26 @@ export const useAuthStore = create<AuthState>()(
         }));
       },
 
-      async tryRefresh() {
-        const { refreshToken } = get();
-        if (!refreshToken) return false;
-        const res = await fetch('/api/v1/auth/refresh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken }),
+      tryRefresh() {
+        refreshInFlight ??= (async () => {
+          const { refreshToken } = get();
+          if (!refreshToken) return false;
+          const res = await fetch('/api/v1/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken }),
+          }).catch(() => null);
+          if (!res?.ok) return false;
+          const tokens = (await res.json()) as {
+            accessToken: string;
+            refreshToken: string;
+          };
+          set({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+          return true;
+        })().finally(() => {
+          refreshInFlight = null;
         });
-        if (!res.ok) return false;
-        const tokens = (await res.json()) as {
-          accessToken: string;
-          refreshToken: string;
-        };
-        set({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
-        return true;
+        return refreshInFlight;
       },
 
       setCompany(companyId) {
@@ -100,6 +110,15 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout() {
+        const { refreshToken } = get();
+        // revoke the session server-side too; local state is cleared either way
+        if (refreshToken) {
+          void fetch('/api/v1/auth/logout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken }),
+          }).catch(() => undefined);
+        }
         set({ accessToken: null, refreshToken: null, me: null, companyId: null });
       },
     }),

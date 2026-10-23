@@ -6,13 +6,16 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { OidcController } from './oidc.controller';
 import { RbacService } from '../rbac/rbac.service';
+import { jwtSecret } from './jwt-secret';
 
 @Module({
   imports: [
     PassportModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET ?? 'dev-only-secret',
-      signOptions: { expiresIn: Number(process.env.JWT_ACCESS_TTL ?? 900) },
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: jwtSecret(),
+        signOptions: { expiresIn: Number(process.env.JWT_ACCESS_TTL ?? 900) },
+      }),
     }),
   ],
   controllers: [AuthController, OidcController],

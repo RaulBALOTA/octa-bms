@@ -151,9 +151,21 @@ export class OidcController {
     }
 
     // provision or link the user
-    let user = await this.prisma.user.findFirst({
-      where: { OR: [{ entraObjectId: claims.oid }, { email }], deletedAt: null },
-    });
+    // prefer the account already bound to this Entra identity; fall back to
+    // linking by email only when none is
+    let user =
+      (await this.prisma.user.findFirst({
+        where: { entraObjectId: claims.oid, deletedAt: null },
+      })) ??
+      (await this.prisma.user.findFirst({
+        where: { email, deletedAt: null },
+      }));
+    // Never let an email match take over an account already bound to a
+    // different Entra identity.
+    if (user?.entraObjectId && user.entraObjectId !== claims.oid) {
+      this.logger.warn(`OIDC login for ${email} rejected: account bound to another Entra object id`);
+      return res.redirect(`${config.appUrl}/login?sso=conflict`);
+    }
     if (!user) {
       user = await this.prisma.user.create({
         data: {

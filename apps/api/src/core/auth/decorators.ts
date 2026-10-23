@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   createParamDecorator,
   ExecutionContext,
   SetMetadata,
@@ -36,7 +37,10 @@ export const CompanyId = createParamDecorator(
       .getRequest<Request & { user?: AuthUser }>();
     const companyId = req.user?.companyId;
     if (!companyId) {
-      throw new Error('Company context missing — X-Company-Id header required');
+      throw new BadRequestException({
+        code: 'COMPANY_CONTEXT_REQUIRED',
+        message: 'Company context missing — X-Company-Id header required',
+      });
     }
     return companyId;
   },

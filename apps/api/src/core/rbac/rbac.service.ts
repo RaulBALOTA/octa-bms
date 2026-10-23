@@ -31,7 +31,12 @@ export class RbacService {
     const userRoles = await this.prisma.userRole.findMany({
       where: {
         userId,
-        OR: [{ companyId: null }, { companyId: companyId ?? undefined }],
+        // Without a company context only global assignments apply. (Passing
+        // `companyId: undefined` would drop the filter and grant every
+        // company-scoped role at once.)
+        ...(companyId
+          ? { OR: [{ companyId: null }, { companyId }] }
+          : { companyId: null }),
       },
       include: {
         role: {

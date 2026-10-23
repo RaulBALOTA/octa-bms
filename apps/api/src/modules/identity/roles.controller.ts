@@ -1,7 +1,20 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString } from 'class-validator';
-import { RequirePermission } from '../../core/auth/decorators';
+import {
+  AuthUser,
+  CurrentUser,
+  RequirePermission,
+} from '../../core/auth/decorators';
+import { RbacService } from '../../core/rbac/rbac.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 class AssignRoleDto {
@@ -21,7 +34,10 @@ class CreateRoleDto {
 @ApiBearerAuth()
 @Controller('identity/roles')
 export class RolesController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rbac: RbacService,
+  ) {}
 
   @Get()
   @RequirePermission('identity.roles.read')
@@ -63,20 +79,41 @@ export class RolesController {
 
   @Post('assign')
   @RequirePermission('identity.roles.update')
-  async assign(@Body() dto: AssignRoleDto) {
-    return this.prisma.userRole.create({
-      data: {
-        userId: dto.userId,
-        roleId: dto.roleId,
-        companyId: dto.companyId ?? null,
-      },
+  async assign(@CurrentUser() user: AuthUser, @Body() dto: AssignRoleDto) {
+    const companyId = dto.companyId ?? null;
+    // Global assignments apply in every company, and other companies are out
+    // of the caller's reach: only system administrators may grant those.
+    if (!user.isSystemAdmin && companyId !== user.companyId) {
+      throw new ForbiddenException(
+        'Roles can only be assigned within the active company',
+      );
+    }
+    const assignment = await this.prisma.userRole.create({
+      data: { userId: dto.userId, roleId: dto.roleId, companyId },
     });
+    this.rbac.invalidate(dto.userId);
+    return assignment;
   }
 
   @Post(':id/revoke/:userRoleId')
   @RequirePermission('identity.roles.update')
-  async revoke(@Param('userRoleId') userRoleId: string) {
+  async revoke(
+    @CurrentUser() user: AuthUser,
+    @Param('id') roleId: string,
+    @Param('userRoleId') userRoleId: string,
+  ) {
+    const assignment = await this.prisma.userRole.findFirst({
+      where: { id: userRoleId, roleId },
+    });
+    if (!assignment) throw new NotFoundException('Role assignment not found');
+    if (!user.isSystemAdmin && assignment.companyId !== user.companyId) {
+      throw new ForbiddenException(
+        'Roles can only be revoked within the active company',
+      );
+    }
     await this.prisma.userRole.delete({ where: { id: userRoleId } });
+    // drop cached permissions so the revocation applies on the next request
+    this.rbac.invalidate(assignment.userId);
     return { ok: true };
   }
 }
