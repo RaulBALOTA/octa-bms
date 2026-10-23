@@ -52,6 +52,15 @@ import { PipelinePage } from './pages/PipelinePage';
 import { WinLossPage } from './pages/WinLossPage';
 import { useAuthStore } from './stores/auth';
 import { DataManagementPage } from './pages/DataManagementPage';
+import { EngineOverviewPage } from './features/business-engine/OverviewPage';
+import { EngineServicesPage } from './features/business-engine/ServicesPage';
+import { EnginePortfolioPage } from './features/business-engine/PortfolioPage';
+import { EngineResourcesPage } from './features/business-engine/ResourcesPage';
+import { EngineFinancialsPage } from './features/business-engine/FinancialsPage';
+import { EngineScenariosPage } from './features/business-engine/ScenariosPage';
+import { EngineOptimizationPage } from './features/business-engine/OptimizationPage';
+import { EngineIntelligencePage } from './features/business-engine/IntelligencePage';
+import { EngineSettingsPage } from './features/business-engine/SettingsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -121,6 +130,15 @@ const router = createBrowserRouter([
           { path: '/finance/budgets', element: <BudgetsPage /> },
           { path: '/finance/dunning', element: <DunningPage /> },
           { path: '/finance/datev', element: <DatevPage /> },
+          { path: '/engine', element: <EngineOverviewPage /> },
+          { path: '/engine/services', element: <EngineServicesPage /> },
+          { path: '/engine/portfolio', element: <EnginePortfolioPage /> },
+          { path: '/engine/resources', element: <EngineResourcesPage /> },
+          { path: '/engine/financials', element: <EngineFinancialsPage /> },
+          { path: '/engine/scenarios', element: <EngineScenariosPage /> },
+          { path: '/engine/optimization', element: <EngineOptimizationPage /> },
+          { path: '/engine/intelligence', element: <EngineIntelligencePage /> },
+          { path: '/engine/settings', element: <EngineSettingsPage /> },
           { path: '*', element: <ComingSoonPage /> },
         ],
       },

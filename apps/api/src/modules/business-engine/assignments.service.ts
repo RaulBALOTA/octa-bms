@@ -54,6 +54,18 @@ export class AssignmentsService {
     return paged(rows.map((r) => (canSeeCosts(user) ? r : { ...r, actualCost: null })), total, query);
   }
 
+  /** Minimal pick-lists for assignment forms (no financial or personal detail beyond names). */
+  async references(companyId: string) {
+    const [clients, contracts, opportunities, employees, departments] = await Promise.all([
+      this.prisma.businessPartner.findMany({ where: { companyId, deletedAt: null, type: 'CLIENT' }, select: { id: true, name: true, partnerNumber: true }, orderBy: { name: 'asc' } }),
+      this.prisma.contract.findMany({ where: { companyId, deletedAt: null, status: { notIn: ['EXPIRED', 'TERMINATED'] } }, select: { id: true, contractNumber: true, title: true, partnerId: true, status: true }, orderBy: { contractNumber: 'desc' } }),
+      this.prisma.opportunity.findMany({ where: { companyId, deletedAt: null, stage: { notIn: ['LOST', 'CANCELLED'] } }, select: { id: true, opportunityNumber: true, title: true, partnerId: true, stage: true, probability: true }, orderBy: { opportunityNumber: 'desc' } }),
+      this.prisma.employee.findMany({ where: { companyId, deletedAt: null, status: { in: ['ACTIVE', 'ON_LEAVE', 'NOTICE_PERIOD'] } }, select: { id: true, firstName: true, lastName: true, departmentId: true }, orderBy: { lastName: 'asc' } }),
+      this.prisma.department.findMany({ where: { companyId, deletedAt: null, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    ]);
+    return { clients, contracts, opportunities, employees: employees.map((e) => ({ id: e.id, name: `${e.firstName} ${e.lastName}`, departmentId: e.departmentId })), departments };
+  }
+
   async get(companyId: string, id: string, user: AuthUser) {
     const row = await this.prisma.engineAssignment.findFirst({ where: { id, companyId, deletedAt: null }, include: detailInclude });
     if (!row) throw new NotFoundException('Assignment not found in this company');

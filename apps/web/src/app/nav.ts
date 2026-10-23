@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Briefcase,
+  Gauge,
   Building2,
   CalendarDays,
   FileText,
@@ -42,6 +43,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'documents', path: '/documents', icon: FolderOpen, implemented: true },
   { key: 'communication', path: '/communication', icon: MessageSquare, implemented: true },
   { key: 'workflow', path: '/workflow', icon: Workflow, implemented: true },
+  { key: 'engine', path: '/engine', icon: Gauge, implemented: true },
   { key: 'bi', path: '/bi', icon: BarChart3, implemented: true },
   { key: 'admin', path: '/admin', icon: Settings, implemented: true },
 ];

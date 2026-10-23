@@ -82,6 +82,7 @@ export class EngineAssignmentsController {
     @Query('clientId') clientId?: string, @Query('contractId') contractId?: string, @Query('opportunityId') opportunityId?: string) {
     return this.assignments.list(c, u, Object.assign(query, { status, serviceId, clientId, contractId, opportunityId }));
   }
+  @Get('references') @RequirePermission('engine.portfolio.read') references(@CompanyId() c: string) { return this.assignments.references(c); }
   @Get(':id') @RequirePermission('engine.portfolio.read') get(@CompanyId() c: string, @CurrentUser() u: AuthUser, @Param('id') id: string) { return this.assignments.get(c, id, u); }
   @Get(':id/economics') @RequirePermission('engine.portfolio.read', 'engine.economics.read') economics(@CompanyId() c: string, @Param('id') id: string) { return this.assignments.economics(c, id); }
   @Post() @RequirePermission('engine.portfolio.create') create(@CompanyId() c: string, @CurrentUser() u: AuthUser, @Body() dto: AssignmentDto) { return this.assignments.create(c, u, dto); }
