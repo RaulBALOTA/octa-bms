@@ -7,6 +7,9 @@ import { AiSummary } from '../components/ai';
 import { printInvoice } from '../lib/print-invoice';
 import { Column, ListPage, StatusBadge } from '../components/ListPage';
 import { FinanceNav } from '../components/FinanceNav';
+import { OpenItemsSummary } from '../components/OpenItemsSummary';
+import { DaysLeft, Meter } from '../components/infographics';
+import { daysUntil } from '../lib/format';
 import {
   Button,
   Dialog,
@@ -680,27 +683,77 @@ export function InvoicesPage() {
   const fmtDate = (iso: string) =>
     new Intl.DateTimeFormat(i18n.language).format(new Date(iso));
 
+  const settled = (i: Invoice) => ['PAID', 'CANCELLED', 'DRAFT'].includes(i.status);
+  const paidShare = (i: Invoice) =>
+    Number(i.grossAmount) > 0 ? (Number(i.paidAmount) / Number(i.grossAmount)) * 100 : 0;
+
   const columns: Column<Invoice>[] = [
     {
       header: t('finance.invoiceNumber'),
       render: (i) => <span className="font-mono text-xs">{i.invoiceNumber}</span>,
+      value: (i) => i.invoiceNumber,
     },
-    { header: t('contracts.partner'), render: (i) => i.partner?.name ?? '—' },
-    { header: t('finance.invoiceDate'), render: (i) => fmtDate(i.invoiceDate) },
-    { header: t('finance.dueDate'), render: (i) => fmtDate(i.dueDate) },
+    { header: t('contracts.partner'), render: (i) => i.partner?.name ?? '—', value: (i) => i.partner?.name },
+    {
+      header: t('finance.invoiceDate'),
+      render: (i) => fmtDate(i.invoiceDate),
+      value: (i) => i.invoiceDate,
+      type: 'date',
+    },
+    {
+      header: t('finance.dueDate'),
+      render: (i) => (
+        <span className="flex items-center gap-2">
+          {fmtDate(i.dueDate)}
+          {!settled(i) && (
+            <DaysLeft
+              days={daysUntil(i.dueDate)}
+              label={(d) =>
+                d < 0 ? t('insights.overdueBy', { count: -d }) : t('insights.daysLeft', { count: d })
+              }
+            />
+          )}
+        </span>
+      ),
+      value: (i) => i.dueDate,
+      type: 'date',
+    },
     {
       header: t('finance.net'),
       render: (i) => fmtMoney(i.netAmount, i.currencyCode),
+      value: (i) => Number(i.netAmount),
+      type: 'money',
       align: 'right',
+      total: 'sum',
+      hidden: true,
     },
     {
       header: t('finance.gross'),
       render: (i) => (
         <span className="font-medium">{fmtMoney(i.grossAmount, i.currencyCode)}</span>
       ),
+      value: (i) => Number(i.grossAmount),
+      type: 'money',
       align: 'right',
+      bar: true,
+      total: 'sum',
     },
-    { header: t('common.status'), render: (i) => <StatusBadge value={i.status} /> },
+    {
+      header: t('finance.paid'),
+      render: (i) => (
+        <div className="ml-auto w-24">
+          <Meter value={paidShare(i)} tone={paidShare(i) >= 100 ? 'success' : 'primary'} />
+          <div className="mt-0.5 text-right text-[11px] tabular-nums text-muted-foreground">
+            {Math.round(paidShare(i))}%
+          </div>
+        </div>
+      ),
+      value: (i) => Number(i.paidAmount),
+      type: 'money',
+      align: 'right',
+      total: 'sum',
+    },
+    { header: t('common.status'), render: (i) => <StatusBadge value={i.status} />, value: (i) => i.status },
   ];
 
   return (
@@ -710,6 +763,7 @@ export function InvoicesPage() {
         title={t('finance.title')}
         endpoint="/finance/invoices"
         columns={columns}
+        summary={<OpenItemsSummary direction={direction} />}
         extraQuery={`direction=${direction}`}
         onRowClick={(i) => setSelectedId(i.id)}
         filters={

@@ -1,11 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { Trophy, XCircle } from 'lucide-react';
+import { PieChart, Trophy, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { api } from '../lib/api';
+import { useFormat } from '../lib/format';
 import { StatusBadge } from '../components/ListPage';
 import { SubNav } from '../components/SubNav';
+import { CHART_SLOTS, DonutChart, HBarList, RingGauge } from '../components/charts';
+import { DataTable } from '../components/DataTable';
+import { KpiTile, PageHeader, Panel } from '../components/infographics';
 import { Skeleton } from '../components/ui';
 import { OpportunityDrawer } from './OpportunityDrawer';
 
@@ -28,8 +32,15 @@ interface WinLossResult {
   }[];
 }
 
+function groupSum<T>(rows: T[], key: (row: T) => string, value: (row: T) => number) {
+  const map = new Map<string, number>();
+  for (const row of rows) map.set(key(row), (map.get(key(row)) ?? 0) + value(row));
+  return [...map.entries()].sort((a, b) => b[1] - a[1]);
+}
+
 export function WinLossPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
+  const fmt = useFormat();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -37,14 +48,19 @@ export function WinLossPage() {
     queryFn: () => api.get<WinLossResult>('/sales/win-loss'),
   });
 
-  const money = (value: number) =>
-    new Intl.NumberFormat(i18n.language, {
-      style: 'currency',
-      currency: 'EUR',
-      maximumFractionDigits: 0,
-    }).format(value);
-  const fmtDate = (iso: string) =>
-    new Intl.DateTimeFormat(i18n.language).format(new Date(iso));
+  const items = data?.items ?? [];
+  const lostReasons = groupSum(
+    items.filter((i) => i.stage === 'LOST'),
+    (i) => i.lostReason?.trim() || '—',
+    (i) => i.value,
+  );
+  const wonByClient = groupSum(
+    items.filter((i) => i.stage === 'WON'),
+    (i) => i.partner,
+    (i) => i.value,
+  ).slice(0, 6);
+  const closed = (data?.wonCount ?? 0) + (data?.lostCount ?? 0);
+  const avgWon = data && data.wonCount ? data.wonValue / data.wonCount : 0;
 
   return (
     <>
@@ -54,96 +70,128 @@ export function WinLossPage() {
           { label: t('sales.winLoss'), to: '/sales/win-loss' },
         ]}
       />
-      <h1 className="mb-4 text-lg font-bold">{t('sales.winLoss')}</h1>
+      <PageHeader title={t('sales.winLoss')} icon={Trophy} />
 
       {isLoading || !data ? (
         <Skeleton className="h-64" />
       ) : (
         <>
-          <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {t('sales.won')} <Trophy size={14} className="text-success" />
-              </div>
-              <div className="mt-1 text-2xl font-bold text-success">{data.wonCount}</div>
-              <div className="text-xs text-muted-foreground">{money(data.wonValue)}</div>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {t('sales.lost')} <XCircle size={14} className="text-destructive" />
-              </div>
-              <div className="mt-1 text-2xl font-bold text-destructive">{data.lostCount}</div>
-              <div className="text-xs text-muted-foreground">{money(data.lostValue)}</div>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4 lg:col-span-2">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {t('sales.winRate')}
-              </div>
-              <div className="mt-1 flex items-baseline gap-3">
-                <span className="text-2xl font-bold tabular-nums">{data.winRate}%</span>
-                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-success"
-                    style={{ width: `${data.winRate}%` }}
-                  />
+          <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <KpiTile
+              label={t('sales.won')}
+              value={data.wonCount}
+              icon={Trophy}
+              tone="success"
+              sub={fmt.money(data.wonValue)}
+            />
+            <KpiTile
+              label={t('sales.lost')}
+              value={data.lostCount}
+              icon={XCircle}
+              tone="destructive"
+              sub={fmt.money(data.lostValue)}
+            />
+            <KpiTile label={t('insights.avgDeal')} value={fmt.compactMoney(avgWon)} icon={PieChart} tone="neutral" sub={t('sales.won')} />
+            <div className="surface flex items-center gap-4 p-4">
+              <RingGauge
+                value={data.winRate}
+                tone={data.winRate >= 50 ? 'success' : data.winRate >= 30 ? 'warning' : 'destructive'}
+              />
+              <div className="min-w-0">
+                <div className="eyebrow">{t('sales.winRate')}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {data.wonCount} / {closed}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="px-4 py-2.5 font-medium">{t('crm.number')}</th>
-                  <th className="px-4 py-2.5 font-medium">{t('contracts.contractTitle')}</th>
-                  <th className="px-4 py-2.5 font-medium">{t('nav.clients')}</th>
-                  <th className="px-4 py-2.5 text-right font-medium">{t('contracts.value')}</th>
-                  <th className="px-4 py-2.5 font-medium">{t('sales.lostReason')}</th>
-                  <th className="px-4 py-2.5 text-right font-medium">{t('sales.closedAt')}</th>
-                  <th className="px-4 py-2.5 font-medium">{t('common.status')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.length ? (
-                  data.items.map((item) => (
-                    <tr
-                      key={item.id}
-                      onClick={() => setSelectedId(item.id)}
-                      className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/50"
-                    >
-                      <td className="px-4 py-2 font-mono text-xs">{item.opportunityNumber}</td>
-                      <td className="px-4 py-2 font-medium">{item.title}</td>
-                      <td className="px-4 py-2">{item.partner}</td>
-                      <td
-                        className={clsx(
-                          'px-4 py-2 text-right tabular-nums',
-                          item.stage === 'WON' ? 'text-success' : 'text-muted-foreground',
-                        )}
-                      >
-                        {money(item.value)}
-                      </td>
-                      <td className="max-w-48 truncate px-4 py-2 text-xs text-muted-foreground">
-                        {item.lostReason ?? '—'}
-                      </td>
-                      <td className="px-4 py-2 text-right text-muted-foreground">
-                        {fmtDate(item.closedAt)}
-                      </td>
-                      <td className="px-4 py-2">
-                        <StatusBadge value={item.stage} />
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
-                      {t('common.noResults')}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="mb-5 grid gap-4 xl:grid-cols-3">
+            <Panel title={t('insights.outcome')} icon={PieChart}>
+              <DonutChart
+                size={150}
+                data={[
+                  { label: t('sales.won'), value: data.wonValue, color: CHART_SLOTS[0] },
+                  { label: t('sales.lost'), value: data.lostValue, color: CHART_SLOTS[1] },
+                ]}
+                centerValue={fmt.compactMoney(data.wonValue + data.lostValue)}
+                centerLabel={t('insights.closedDeals', { count: closed })}
+                formatValue={fmt.compactMoney}
+              />
+            </Panel>
+            <Panel title={t('insights.lostReasons')} subtitle={t('insights.lostReasonsHint')} icon={XCircle}>
+              {lostReasons.length ? (
+                <HBarList
+                  data={lostReasons.slice(0, 6).map(([label, value]) => ({
+                    label,
+                    value,
+                    detail: fmt.compactMoney(value),
+                  }))}
+                />
+              ) : (
+                <p className="py-6 text-center text-sm text-muted-foreground">{t('common.noResults')}</p>
+              )}
+            </Panel>
+            <Panel title={t('insights.byClient')} icon={Trophy}>
+              {wonByClient.length ? (
+                <HBarList
+                  data={wonByClient.map(([label, value]) => ({
+                    label,
+                    value,
+                    detail: fmt.compactMoney(value),
+                  }))}
+                />
+              ) : (
+                <p className="py-6 text-center text-sm text-muted-foreground">{t('common.noResults')}</p>
+              )}
+            </Panel>
           </div>
+
+          <DataTable
+            rows={items}
+            rowKey={(i) => i.id}
+            onRowClick={(i) => setSelectedId(i.id)}
+            exportName="win-loss"
+            initialSort={{ key: 'closed', dir: 'desc' }}
+            pivot={{ row: 'partner', col: 'stage', value: 'value' }}
+            columns={[
+              {
+                key: 'number',
+                header: t('crm.number'),
+                value: (i) => i.opportunityNumber,
+                render: (i) => <span className="font-mono text-xs">{i.opportunityNumber}</span>,
+              },
+              { key: 'title', header: t('contracts.contractTitle'), value: (i) => i.title, className: 'font-medium' },
+              { key: 'partner', header: t('nav.clients'), value: (i) => i.partner },
+              {
+                key: 'value',
+                header: t('contracts.value'),
+                value: (i) => i.value,
+                type: 'money',
+                align: 'right',
+                bar: true,
+                total: 'sum',
+                render: (i) => (
+                  <span className={clsx(i.stage === 'WON' ? 'font-medium text-success' : 'text-muted-foreground')}>
+                    {fmt.money(i.value)}
+                  </span>
+                ),
+              },
+              {
+                key: 'reason',
+                header: t('sales.lostReason'),
+                value: (i) => i.lostReason,
+                className: 'max-w-48 truncate text-xs text-muted-foreground',
+              },
+              { key: 'closed', header: t('sales.closedAt'), value: (i) => i.closedAt, type: 'date', align: 'right' },
+              {
+                key: 'stage',
+                header: t('common.status'),
+                value: (i) => i.stage,
+                render: (i) => <StatusBadge value={i.stage} />,
+              },
+            ]}
+          />
         </>
       )}
 

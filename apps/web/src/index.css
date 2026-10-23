@@ -15,6 +15,30 @@
   --destructive: 0 72% 51%;
   --success: 142 71% 38%;
   --warning: 38 92% 45%;
+  --ring: 221 83% 53%;
+  --sidebar: 222 47% 11%;
+  --sidebar-foreground: 215 20% 75%;
+  --sidebar-muted: 217 33% 17%;
+
+  /* categorical chart slots — fixed order, validated (dataviz validator, light surface #fff) */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-8: #e34948;
+  /* sequential (heatmap) hue: blue 100 → 600 */
+  --seq-lo: 205 226 251;
+  --seq-hi: 24 79 149;
+  --seq-ink-hi: 255 255 255;
+  /* ordinal blue ramp (steps 250→650), e.g. aging buckets young → old */
+  --ord-1: #86b6ef;
+  --ord-2: #5598e7;
+  --ord-3: #2a78d6;
+  --ord-4: #1c5cab;
+  --ord-5: #104281;
 }
 
 .dark {
@@ -30,6 +54,28 @@
   --destructive: 0 72% 55%;
   --success: 142 60% 45%;
   --warning: 38 92% 55%;
+  --ring: 217 91% 60%;
+  --sidebar: 224 24% 7%;
+  --sidebar-foreground: 220 9% 65%;
+  --sidebar-muted: 223 16% 14%;
+
+  /* dark steps of the same eight hues (validated vs card surface #18202e) */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #008300;
+  --chart-7: #9085e9;
+  --chart-8: #e66767;
+  --seq-lo: 24 40 66;
+  --seq-hi: 109 167 236;
+  --seq-ink-hi: 11 18 32;
+  --ord-1: #184f95;
+  --ord-2: #256abf;
+  --ord-3: #3987e5;
+  --ord-4: #6da7ec;
+  --ord-5: #9ec5f4;
 }
 
 body {
@@ -37,6 +83,51 @@ body {
   font-size: 13.5px;
   font-family: 'Inter Variable', Inter, system-ui, sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+@layer components {
+  .surface {
+    @apply rounded-xl border border-border bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)];
+  }
+  .surface-hover {
+    @apply transition-all hover:-translate-y-px hover:border-primary/40 hover:shadow-md;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-wider text-muted-foreground;
+  }
+  .seg-btn {
+    @apply inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground;
+  }
+  .seg-btn-active {
+    @apply bg-card text-foreground shadow-sm;
+  }
+}
+
+/* DataTable rows: backgrounds live on the cells so sticky cells stay opaque and in sync */
+.dt-row > td {
+  background-color: hsl(var(--card));
+  transition: background-color 0.12s;
+}
+.dt-row:nth-child(even) > td {
+  background-color: color-mix(in oklab, hsl(var(--muted)) 40%, hsl(var(--card)));
+}
+.dt-row.dt-row-alert > td {
+  background-color: color-mix(in oklab, hsl(var(--destructive)) 6%, hsl(var(--card)));
+}
+.dt-row:hover > td,
+.dt-row:focus-visible > td {
+  background-color: color-mix(in oklab, hsl(var(--accent)) 70%, hsl(var(--card)));
+}
+
+@keyframes fadeUp {
+  from {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 @keyframes slideIn {

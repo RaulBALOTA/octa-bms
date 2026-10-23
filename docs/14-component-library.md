@@ -58,6 +58,25 @@ Form primitives (FormField wrapper binding RHF + zod + error i18n).
 | **AiAssistantPanel** | per-record AI actions (summarize/draft/translate) with streaming |
 | **AuditDrawer** | field-level change history viewer |
 
+## Implemented today — tables, pivots & infographics
+
+What ships in `apps/web/src/components` now (dependency-free; Recharts/TanStack Table above
+remain the target where noted):
+
+| Component | File | Purpose |
+|---|---|---|
+| **DataTable** | `DataTable.tsx` | client-side enhanced table: sortable headers, quick filter, column chooser, density toggle (persisted), in-cell magnitude bars, totals footer, CSV export (`;` + BOM for German Excel), sticky actions column, **Table ⇄ Pivot** switch. Server paging plugs in via `footer` + `Pager`. |
+| **ListPage** | `ListPage.tsx` | server-paginated module list on top of DataTable; columns may declare `value` / `type` / `bar` / `total` so dates and amounts sort, total and pivot correctly. |
+| **PivotTable** | `PivotTable.tsx` + `lib/pivot.ts` | rows × columns × measure with sum/avg/min/max/count, date → month grouping, swap axes, heatmap, % of total, grid or stacked-bar chart mode, CSV export. Picks a sensible grouping field by default (skips ID-like columns). |
+| **Charts** | `charts.tsx` | `BarChart`, `AreaChart` (crosshair), `DivergingBarChart` (in/out on one axis), `DonutChart`, `RingGauge`, `SegmentBar`, `Funnel`, `Sparkline`, `HBarList`, `heatStyle`. Responsive, hover tooltips, legends with values. |
+| **Infographics** | `infographics.tsx` | `PageHeader`, `Panel`, `KpiTile` (delta, sparkline, meter, link/button), `Meter`, `ViewSwitch`, `Pill`, `DaysLeft`, `EmptyState`. |
+| **OpenItemsSummary** | `OpenItemsSummary.tsx` | receivables/payables KPI strip + aging bar from server totals. |
+
+Chart colors are CSS tokens: categorical `--chart-1…8` (fixed order, validated for CVD and
+contrast in light and dark), ordinal `--ord-1…5` (e.g. aging buckets) and the sequential
+heat ramp `--seq-lo/--seq-hi`. Status colors (`--success/--warning/--destructive`) stay reserved
+for state and always ship with a label.
+
 ## Composition rule
 
 Features never style raw HTML for shared patterns — if a pattern appears twice, it becomes a

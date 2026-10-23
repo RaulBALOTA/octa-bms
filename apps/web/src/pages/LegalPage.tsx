@@ -252,7 +252,7 @@ export function LegalPage() {
       header: t('contracts.contractTitle'),
       render: (c) => <span className="font-medium">{c.title}</span>,
     },
-    { header: t('finance.dueDate'), render: (c) => fmtDate(c.dueDate) },
+    { header: t('finance.dueDate'), render: (c) => fmtDate(c.dueDate), value: (c) => c.dueDate, type: 'date' },
     {
       header: t('legal.recurrence'),
       render: (c) => (c.recurrence ? t(`legal.recurrenceType.${c.recurrence}`) : '—'),
@@ -291,6 +291,10 @@ export function LegalPage() {
     {
       header: t('legal.amountInDispute'),
       render: (c) => fmtMoney(c.amountInDispute),
+      value: (c) => c.amountInDispute == null ? null : Number(c.amountInDispute),
+      type: 'money',
+      bar: true,
+      total: 'sum',
       align: 'right',
     },
     { header: t('common.status'), render: (c) => <StatusBadge value={c.status} /> },

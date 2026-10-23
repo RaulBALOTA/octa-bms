@@ -283,7 +283,7 @@ export function PaymentsPage() {
     new Intl.DateTimeFormat(i18n.language).format(new Date(iso));
 
   const columns: Column<Payment>[] = [
-    { header: t('finance.invoiceDate'), render: (p) => fmtDate(p.paymentDate) },
+    { header: t('finance.invoiceDate'), render: (p) => fmtDate(p.paymentDate), value: (p) => p.paymentDate, type: 'date' },
     {
       header: t('finance.direction'),
       render: (p) => (
@@ -305,6 +305,10 @@ export function PaymentsPage() {
     {
       header: t('finance.amount'),
       render: (p) => <span className="font-medium tabular-nums">{money(p.amount)}</span>,
+      value: (p) => p.amount == null ? null : Number(p.amount),
+      type: 'money',
+      bar: true,
+      total: 'sum',
       align: 'right',
     },
   ];

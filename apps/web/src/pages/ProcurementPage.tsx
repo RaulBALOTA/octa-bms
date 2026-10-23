@@ -364,6 +364,10 @@ export function ProcurementPage() {
     {
       header: t('procurement.estimate'),
       render: (r) => money(r.totalEstimate),
+      value: (r) => r.totalEstimate == null ? null : Number(r.totalEstimate),
+      type: 'money',
+      bar: true,
+      total: 'sum',
       align: 'right',
     },
     { header: t('common.status'), render: (r) => <StatusBadge value={r.status} /> },

@@ -1,10 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bell,
+  Building2,
   ChevronDown,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Languages,
   LogOut,
-  Menu,
+  Monitor,
   Moon,
   Search,
   Sparkles,
@@ -12,14 +16,14 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import { AiPanel } from '../components/ai';
 import { setLanguage } from '../i18n';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
-import { NAV_ITEMS } from './nav';
+import { NAV_GROUPS, NAV_ITEMS, navItemFor } from './nav';
 import { MODULE_ARCHIVES, relatedModuleRecords } from './module-records';
 import { ArchivedRecordsButton, ModuleRelatedRecords } from '../components/ModuleRecords';
 
@@ -44,7 +48,16 @@ export function Layout() {
   const queryClient = useQueryClient();
   const { me, companyId, setCompany, logout, loadMe } = useAuthStore();
   const needsCompany = !!me?.isSystemAdmin && me.memberships.length === 0 && !['/group','/group/compare','/admin'].includes(location.pathname);
-  const { theme, setTheme, sidebarCollapsed, toggleSidebar } = useUiStore();
+  const { theme, setTheme, sidebarCollapsed: collapsedPref, toggleSidebar } = useUiStore();
+  // narrow windows always get the icon rail so content keeps its room
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1023px)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 1023px)');
+    const onChange = (e: MediaQueryListEvent) => setNarrow(e.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  const sidebarCollapsed = collapsedPref || narrow;
   useEffect(() => { void loadMe(); }, [loadMe]);
   useEffect(() => { void queryClient.invalidateQueries(); }, [companyId, queryClient]);
 
@@ -52,6 +65,9 @@ export function Layout() {
   const [searchTerm, setSearchTerm] = useState('');
   const [bellOpen, setBellOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [userOpen, setUserOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Ctrl+K / Cmd+K opens global search
@@ -64,6 +80,7 @@ export function Layout() {
       if (e.key === 'Escape') {
         setSearchOpen(false);
         setBellOpen(false);
+        setUserOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -73,6 +90,25 @@ export function Layout() {
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
+
+  // close header popovers on outside click
+  useEffect(() => {
+    if (!userOpen && !bellOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (userOpen && !userMenuRef.current?.contains(target)) setUserOpen(false);
+      if (bellOpen && !bellRef.current?.contains(target)) setBellOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [userOpen, bellOpen]);
+
+  const activeItem = navItemFor(location.pathname);
+  const visibleItems = NAV_ITEMS.filter((item) => item.key !== 'data' || me?.isSystemAdmin);
+  const fullName = [me?.firstName, me?.lastName].filter(Boolean).join(' ');
+  const activeCompany = me?.memberships.find((m) => m.company.id === companyId)?.company.name;
+  const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
+  const nextTheme = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';
 
   const { data: searchResults } = useQuery({
     queryKey: ['global-search', searchTerm],
@@ -97,61 +133,108 @@ export function Layout() {
   });
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-background">
       {/* Sidebar */}
       <aside
         className={clsx(
-          'flex flex-col border-r border-border bg-card transition-all',
-          sidebarCollapsed ? 'w-14' : 'w-56',
+          'flex shrink-0 flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-200',
+          sidebarCollapsed ? 'w-[60px]' : 'w-60',
         )}
       >
-        <div className="flex h-12 items-center gap-2 border-b border-border px-3">
-          <button
-            onClick={toggleSidebar}
-            className="rounded p-1.5 hover:bg-muted"
-            aria-label="Toggle sidebar"
-          >
-            <Menu size={16} />
-          </button>
+        <div className="flex h-14 items-center gap-2.5 px-3.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#3987e5] to-[#6250d6] text-sm font-black text-white shadow-lg shadow-black/20">
+            O
+          </span>
           {!sidebarCollapsed && (
-            <span className="text-sm font-semibold">{t('app.name')}</span>
+            <div className="min-w-0 leading-tight">
+              <div className="text-sm font-bold tracking-tight text-white">{t('app.name')}</div>
+              {activeCompany && (
+                <div className="truncate text-[11px] text-sidebar-foreground/80">{activeCompany}</div>
+              )}
+            </div>
           )}
         </div>
-        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
-          {NAV_ITEMS.filter((item) => item.key !== 'data' || me?.isSystemAdmin).map((item) => (
-            <NavLink
-              key={item.key}
-              to={item.path}
-              end={item.path === '/'}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm',
-                  isActive
-                    ? 'bg-accent font-medium text-primary'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  !item.implemented && 'opacity-50',
-                )
-              }
-              title={t(`nav.${item.key}`)}
-            >
-              <item.icon size={16} className="shrink-0" />
-              {!sidebarCollapsed && <span>{t(`nav.${item.key}`)}</span>}
-            </NavLink>
-          ))}
+        <nav className="flex-1 overflow-y-auto px-2 pb-3">
+          {NAV_GROUPS.map((group) => {
+            const items = visibleItems.filter((item) => item.group === group);
+            if (!items.length) return null;
+            return (
+              <div key={group} className="mt-3 first:mt-1">
+                {sidebarCollapsed ? (
+                  <div className="mx-2 mb-1.5 border-t border-white/5" />
+                ) : (
+                  <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/50">
+                    {t(`shell.groups.${group}`)}
+                  </div>
+                )}
+                <div className="space-y-0.5">
+                  {items.map((item) => {
+                    const active = activeItem?.key === item.key;
+                    return (
+                      <Link
+                        key={item.key}
+                        to={item.path}
+                        aria-current={active ? 'page' : undefined}
+                        className={clsx(
+                          'group relative flex items-center gap-3 rounded-md px-2.5 py-[7px] text-[13px] transition-colors',
+                          active
+                            ? 'bg-white/10 font-medium text-white'
+                            : 'hover:bg-white/5 hover:text-white',
+                          !item.implemented && 'opacity-50',
+                          sidebarCollapsed && 'justify-center',
+                        )}
+                        title={t(`nav.${item.key}`)}
+                      >
+                        {active && (
+                          <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-r bg-[#3987e5]" />
+                        )}
+                        <item.icon
+                          size={16}
+                          className={clsx('shrink-0', active ? 'text-[#6da7ec]' : 'opacity-80')}
+                        />
+                        <span className={clsx(sidebarCollapsed ? 'sr-only' : 'truncate')}>
+                          {t(`nav.${item.key}`)}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </nav>
+        <button
+          onClick={toggleSidebar}
+          className={clsx('m-2 items-center gap-2 rounded-md px-2.5 py-2 text-xs hover:bg-white/5 hover:text-white', narrow ? 'hidden' : 'flex')}
+          
+          aria-label={sidebarCollapsed ? t('shell.expand') : t('shell.collapse')}
+          title={sidebarCollapsed ? t('shell.expand') : t('shell.collapse')}
+        >
+          {sidebarCollapsed ? <ChevronsRight size={15} className="mx-auto" /> : <><ChevronsLeft size={15} />{t('shell.collapse')}</>}
+        </button>
       </aside>
 
       {/* Main */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Topbar */}
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card/80 px-5 backdrop-blur">
+          {activeItem && (
+            <div className="hidden min-w-0 items-center gap-1.5 whitespace-nowrap text-sm lg:flex">
+              <span className="hidden text-muted-foreground 2xl:inline">{t(`shell.groups.${activeItem.group}`)}</span>
+              <ChevronRight size={13} className="hidden text-muted-foreground/60 2xl:inline" />
+              <span className="flex items-center gap-1.5 truncate font-semibold">
+                <activeItem.icon size={14} className="text-primary" />
+                {t(`nav.${activeItem.key}`)}
+              </span>
+            </div>
+          )}
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex w-72 items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+            className="ml-2 flex w-72 min-w-0 shrink items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-primary/40"
           >
             <Search size={14} />
-            <span className="flex-1 text-left">{t('common.search')}</span>
-            <kbd className="rounded border border-border px-1 text-[10px]">
+            <span className="flex-1 truncate text-left">{t('common.search')}</span>
+            <kbd className="rounded border border-border bg-card px-1.5 text-[10px] font-medium">
               Ctrl K
             </kbd>
           </button>
@@ -161,13 +244,18 @@ export function Layout() {
           {/* Company switcher */}
           {me && me.memberships.length > 0 && (
             <div className="relative">
+              <Building2
+                size={14}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
               <select
                 value={companyId ?? ''}
                 onChange={(e) => {
                   setCompany(e.target.value);
                   void queryClient.invalidateQueries();
                 }}
-                className="appearance-none rounded-md border border-border bg-background py-1.5 pl-3 pr-8 text-sm"
+                className="appearance-none rounded-lg border border-border bg-background py-1.5 pl-8 pr-8 text-sm font-medium hover:border-primary/40"
+                aria-label={t('shell.company')}
               >
                 {me.memberships.map((m) => (
                   <option key={m.company.id} value={m.company.id}>
@@ -185,16 +273,17 @@ export function Layout() {
           {/* AI assistant */}
           <button
             onClick={() => setAiOpen(true)}
-            className="rounded p-1.5 text-primary hover:bg-muted"
+            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-gradient-to-r from-primary to-[#6250d6] px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-90"
             title={t('ai.title')}
           >
-            <Sparkles size={16} />
+            <Sparkles size={14} />
+            <span className="hidden xl:inline">{t('ai.title')}</span>
           </button>
 
           {/* Language */}
           <button
             onClick={() => setLanguage(i18n.language === 'de' ? 'en' : 'de')}
-            className="flex items-center gap-1 rounded p-1.5 text-sm hover:bg-muted"
+            className="flex items-center gap-1 rounded-md p-1.5 text-sm hover:bg-muted"
             title={t('common.language')}
           >
             <Languages size={16} />
@@ -203,18 +292,19 @@ export function Layout() {
 
           {/* Theme */}
           <button
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded p-1.5 hover:bg-muted"
-            title={t('common.darkMode')}
+            onClick={() => setTheme(nextTheme)}
+            className="rounded-md p-1.5 hover:bg-muted"
+            title={`${t('common.darkMode')}: ${t(`shell.theme.${theme}`)}`}
+            aria-label={`${t('common.darkMode')}: ${t(`shell.theme.${theme}`)}`}
           >
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            <ThemeIcon size={16} />
           </button>
 
           {/* Notifications */}
-          <div className="relative">
+          <div className="relative" ref={bellRef}>
             <button
               onClick={() => setBellOpen((o) => !o)}
-              className="relative rounded p-1.5 hover:bg-muted"
+              className="relative rounded-md p-1.5 hover:bg-muted"
               title={t('common.notifications')}
             >
               <Bell size={16} />
@@ -225,7 +315,7 @@ export function Layout() {
               )}
             </button>
             {bellOpen && (
-              <div className="absolute right-0 top-9 z-50 w-96 rounded-lg border border-border bg-card shadow-xl">
+              <div className="absolute right-0 top-10 z-50 w-96 rounded-xl border border-border bg-card shadow-2xl">
                 <div className="flex items-center justify-between border-b border-border px-3 py-2">
                   <span className="text-sm font-semibold">
                     {t('common.notifications')}
@@ -279,26 +369,65 @@ export function Layout() {
           </div>
 
           {/* User */}
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-              {me?.firstName?.[0]}
-              {me?.lastName?.[0]}
-            </div>
+          <div className="relative" ref={userMenuRef}>
             <button
-              onClick={() => {
-                logout();
-                navigate('/login');
-              }}
-              className="rounded p-1.5 hover:bg-muted"
-              title={t('auth.logout')}
+              onClick={() => setUserOpen((o) => !o)}
+              className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 hover:bg-muted"
+              aria-expanded={userOpen}
+              aria-haspopup="menu"
             >
-              <LogOut size={16} />
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#6250d6] text-[11px] font-semibold text-white">
+                {me?.firstName?.[0]}
+                {me?.lastName?.[0]}
+              </span>
+              <span className="hidden max-w-32 truncate text-sm font-medium 2xl:inline">{fullName}</span>
+              <ChevronDown size={13} className="text-muted-foreground" />
             </button>
+            {userOpen && (
+              <div role="menu" className="absolute right-0 top-10 z-50 w-60 rounded-xl border border-border bg-card p-1.5 shadow-2xl">
+                <div className="px-2.5 py-2">
+                  <div className="text-[11px] text-muted-foreground">{t('shell.profile')}</div>
+                  <div className="truncate text-sm font-semibold">{fullName}</div>
+                  {activeCompany && <div className="truncate text-xs text-muted-foreground">{activeCompany}</div>}
+                </div>
+                <div className="my-1 border-t border-border" />
+                <div className="flex gap-1 px-1.5 py-1">
+                  {(['light', 'dark', 'system'] as const).map((option) => {
+                    const Icon = option === 'light' ? Sun : option === 'dark' ? Moon : Monitor;
+                    return (
+                      <button
+                        key={option}
+                        onClick={() => setTheme(option)}
+                        className={clsx(
+                          'flex flex-1 flex-col items-center gap-1 rounded-md py-1.5 text-[11px]',
+                          theme === option ? 'bg-accent font-medium text-primary' : 'text-muted-foreground hover:bg-muted',
+                        )}
+                      >
+                        <Icon size={14} />
+                        {t(`shell.theme.${option}`)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="my-1 border-t border-border" />
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    logout();
+                    navigate('/login');
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm text-destructive hover:bg-destructive/10"
+                >
+                  <LogOut size={15} />
+                  {t('auth.logout')}
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-5">
+        <main className="flex-1 overflow-y-auto bg-background px-6 py-5">
           {!me ? <p className="p-8 text-center text-muted-foreground">{t('common.loading')}</p> : needsCompany ? <section className="mx-auto mt-12 max-w-xl rounded-xl border border-border bg-card p-8 text-center">
             <h1 className="text-lg font-bold">{t('data.emptyWorkspace')}</h1>
             <p className="mt-2 text-sm text-muted-foreground">{t('data.createOwnCompany')}</p>

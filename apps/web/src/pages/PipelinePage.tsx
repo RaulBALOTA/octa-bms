@@ -1,11 +1,13 @@
 import { RecordActions } from '../components/RecordActions';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Plus, Trophy, XCircle } from 'lucide-react';
+import { Briefcase, CalendarClock, Filter, Percent, Plus, Scale, Trophy, XCircle } from 'lucide-react';
 import { DragEvent, FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { api, Paged } from '../lib/api';
 import { SubNav } from '../components/SubNav';
+import { Funnel } from '../components/charts';
+import { KpiTile, PageHeader, Panel } from '../components/infographics';
 import {
   Avatar,
   Button,
@@ -189,6 +191,12 @@ export function PipelinePage() {
     }).format(value);
 
   const totalWeighted = columns?.reduce((sum, c) => sum + c.weightedValue, 0) ?? 0;
+  const totalValue = columns?.reduce((sum, c) => sum + c.totalValue, 0) ?? 0;
+  const totalCount = columns?.reduce((sum, c) => sum + c.count, 0) ?? 0;
+  const nextDeadline = (columns ?? [])
+    .flatMap((c) => c.items)
+    .filter((card) => card.submissionDeadline && new Date(card.submissionDeadline) >= new Date(new Date().toDateString()))
+    .sort((a, b) => a.submissionDeadline!.localeCompare(b.submissionDeadline!))[0];
 
   const onDrop = (e: DragEvent, stage: string) => {
     e.preventDefault();
@@ -216,17 +224,73 @@ export function PipelinePage() {
           { label: t('sales.winLoss'), to: '/sales/win-loss' },
         ]}
       />
-      <div className="mb-4 flex items-center gap-3">
-        <h1 className="text-lg font-bold">{t('sales.pipeline')}</h1>
-        <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-          Σ {t('sales.weighted')}: <strong>{money(totalWeighted)}</strong>
-        </span>
-        <div className="flex-1" />
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={14} />
-          {t('common.new')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('sales.pipeline')}
+        icon={Briefcase}
+        subtitle={
+          <>
+            Σ {t('sales.weighted')}: <strong className="text-foreground">{money(totalWeighted)}</strong>
+          </>
+        }
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus size={14} />
+            {t('common.new')}
+          </Button>
+        }
+      />
+
+      {columns && columns.length > 0 && (
+        <div className="mb-4 grid shrink-0 gap-3 xl:grid-cols-2">
+          <div className="grid grid-cols-2 gap-3">
+          <KpiTile
+            label={t('insights.pipelineValue')}
+            value={money(totalValue)}
+            icon={Briefcase}
+            sub={t('insights.pipelineDeals', { count: totalCount })}
+          />
+          <KpiTile
+            label={t('sales.weighted')}
+            value={money(totalWeighted)}
+            icon={Scale}
+            tone="success"
+            progress={totalValue ? (totalWeighted / totalValue) * 100 : 0}
+            sub={`${totalValue ? Math.round((totalWeighted / totalValue) * 100) : 0}% ${t('insights.weightedShare')}`}
+          />
+          <KpiTile
+            label={t('insights.avgDeal')}
+            value={money(totalCount ? totalValue / totalCount : 0)}
+            icon={Percent}
+            tone="neutral"
+          />
+          <KpiTile
+            label={t('insights.nextDeadline')}
+            value={
+              nextDeadline
+                ? new Intl.DateTimeFormat(i18n.language, { day: '2-digit', month: 'short' }).format(
+                    new Date(nextDeadline.submissionDeadline!),
+                  )
+                : '—'
+            }
+            icon={CalendarClock}
+            tone="warning"
+            sub={nextDeadline ? nextDeadline.title : t('insights.noDeadline')}
+            onClick={nextDeadline ? () => setSelectedId(nextDeadline.id) : undefined}
+          />
+          </div>
+          <Panel title={t('insights.funnel')} subtitle={t('insights.funnelHint')} icon={Filter} bodyClassName="pt-1">
+            <Funnel
+              formatValue={(v) => money(v)}
+              data={columns.map((column) => ({
+                label: t(`sales.stage.${column.stage}`),
+                value: column.totalValue,
+                count: column.count,
+                detail: `${column.count} · ${money(column.totalValue)}`,
+              }))}
+            />
+          </Panel>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-5 gap-3">
@@ -235,7 +299,7 @@ export function PipelinePage() {
           ))}
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-5 gap-3 overflow-x-auto">
+        <div className="grid min-h-[420px] flex-1 grid-cols-5 gap-3 overflow-x-auto">
           {columns?.map((column) => (
             <div
               key={column.stage}

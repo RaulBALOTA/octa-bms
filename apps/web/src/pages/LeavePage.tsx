@@ -194,8 +194,10 @@ export function LeavePage() {
     {
       header: t('leave.period'),
       render: (r) => `${fmtDate(r.startDate)} → ${fmtDate(r.endDate)}`,
+      value: (r) => r.startDate,
+      type: 'date',
     },
-    { header: t('leave.days'), render: (r) => Number(r.days), align: 'right' },
+    { header: t('leave.days'), render: (r) => Number(r.days), value: (r) => Number(r.days), type: 'number', bar: true, total: 'sum', align: 'right' },
     { header: t('common.status'), render: (r) => <StatusBadge value={r.status} /> },
     {
       header: '',

@@ -908,11 +908,17 @@ export function ContractsPage() {
     {
       header: t('contracts.value'),
       render: (c) => fmtMoney(c.value, c.currencyCode),
+      value: (c) => c.value == null ? null : Number(c.value),
+      type: 'money',
+      bar: true,
+      total: 'sum',
       align: 'right',
     },
     {
       header: t('contracts.endDate'),
       render: (c) => fmtDate(c.endDate),
+      value: (c) => c.endDate,
+      type: 'date',
       align: 'right',
     },
     { header: t('common.status'), render: (c) => <StatusBadge value={c.status} /> },

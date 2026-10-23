@@ -471,6 +471,9 @@ export function PartnersPage() {
     {
       header: t('crm.contacts'),
       render: (p) => p._count?.contacts ?? 0,
+      value: (p) => p._count?.contacts ?? 0,
+      type: 'number',
+      bar: true,
       align: 'right',
     },
     { header: t('common.status'), render: (p) => <StatusBadge value={p.status} /> },

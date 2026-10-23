@@ -4,11 +4,13 @@ import de from './de.json';
 import en from './en.json';
 import calendarDe from './calendar.de.json';
 import calendarEn from './calendar.en.json';
+import uiDe from './ui.de.json';
+import uiEn from './ui.en.json';
 
 void i18n.use(initReactI18next).init({
   resources: {
-    de: { translation: { ...de, calendar: calendarDe, nav: { ...de.nav, companyCalendar: calendarDe.title } } },
-    en: { translation: { ...en, calendar: calendarEn, nav: { ...en.nav, companyCalendar: calendarEn.title } } },
+    de: { translation: { ...de, ...uiDe, calendar: calendarDe, nav: { ...de.nav, companyCalendar: calendarDe.title } } },
+    en: { translation: { ...en, ...uiEn, calendar: calendarEn, nav: { ...en.nav, companyCalendar: calendarEn.title } } },
   },
   lng: localStorage.getItem('octa-bms-lang') ?? 'de',
   fallbackLng: 'en',
