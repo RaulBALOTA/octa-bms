@@ -1,6 +1,6 @@
 # Business Engine — Implementation State
 
-_Last updated: 2026-10-23 (checkpoint 1)_
+_Last updated: 2026-10-23 (checkpoint 2)_
 
 ## Current phase
 Phase 1–7 domain engine complete and tested; API/UI integration in progress.
@@ -12,8 +12,11 @@ Phase 1–7 domain engine complete and tested; API/UI integration in progress.
 - Domain engine `apps/api/src/modules/business-engine/domain`: money, calendar/time model, config, portfolio (economics, capacity allocation, P&L, cash/VAT), scenario ops + comparison + sensitivity/break-even, Monte Carlo, sourcing (make/buy/hire), optimizer (HiGHS MILP), intelligence (benchmarks, recalibration, attractiveness, alerts, rule recommendations).
 - Dependency: `highs` (MIT, WASM) in apps/api.
 
+- API module `BusinessEngineModule` (settings, catalog, resources, assignments, PMO adapter, analytics/reports, scenarios, optimization, intelligence, advisor, job runner).
+
 ## Tests
-`pnpm exec vitest run src/modules/business-engine` → 50 passed (cases A–H covered).
+- `pnpm exec vitest run src/modules/business-engine` → 67 passed (cases A–H, permissions, validation).
+- `pnpm exec tsx --env-file=.env test/business-engine.http.ts http://localhost:3000` against a running API → passed (includes case I: AI off).
 
 ## Next step
-Implement Nest services/controllers (snapshot builder from DB), then web UI.
+Web UI (`apps/web/src/features/business-engine`, pages under `/engine/*`).

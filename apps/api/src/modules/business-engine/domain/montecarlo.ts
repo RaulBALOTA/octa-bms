@@ -39,6 +39,21 @@ export function summarize(values: number[]): DistributionSummary {
  * Mutually exclusive alternatives (same exclusiveGroup) can never be won together.
  */
 export function monteCarlo(snapshot: EngineSnapshot, iterations: number, seed: number, shouldStop: () => boolean = () => false): MonteCarloResult {
+  const steps = monteCarloSteps(snapshot, iterations, seed, shouldStop);
+  for (;;) { const next = steps.next(); if (next.done) return next.value; }
+}
+
+/** Same simulation, yielding to the event loop every `chunk` iterations so runs can be cancelled. */
+export async function monteCarloAsync(snapshot: EngineSnapshot, iterations: number, seed: number, shouldStop: () => boolean, onProgress?: (done: number) => void, chunk = 5): Promise<MonteCarloResult> {
+  const steps = monteCarloSteps(snapshot, iterations, seed, shouldStop);
+  for (let i = 0; ; i++) {
+    const next = steps.next();
+    if (next.done) return next.value;
+    if (i % chunk === 0) { onProgress?.(next.value); await new Promise((resolve) => setImmediate(resolve)); }
+  }
+}
+
+function* monteCarloSteps(snapshot: EngineSnapshot, iterations: number, seed: number, shouldStop: () => boolean): Generator<number, MonteCarloResult, void> {
   const cfg = snapshot.config.monteCarlo; const rho = cfg.correlation;
   const rand = prng(seed);
   const reserve = Number(snapshot.config.cash.minCashReserve);
@@ -80,6 +95,7 @@ export function monteCarlo(snapshot: EngineSnapshot, iterations: number, seed: n
     out.revenue.push(Number(m.revenue)); out.contribution.push(Number(m.contribution)); out.operating.push(operating); out.minCash.push(minCash); out.shortage.push(m.shortageHours);
     if (minCash < 0) negativeCash++; if (dec(m.minCash).lt(reserve)) belowReserve++; if (m.shortageHours > 0.01 || m.overloadCount > 0) overload++; if (operating < 0) negativeResult++;
     done++;
+    yield done;
   }
   const p = (count: number) => (done ? Math.round((count / done) * 10000) / 10000 : 0);
   return {

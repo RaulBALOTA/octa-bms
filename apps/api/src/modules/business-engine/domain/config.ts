@@ -17,7 +17,8 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
     defaultInternalCostRate: '70.00', defaultExternalRate: '95.00', shortageCostRate: '115.00',
     seniorityCostFactors: { JUNIOR: 0.75, PROFESSIONAL: 1, SENIOR: 1.25, LEAD: 1.45, PRINCIPAL: 1.7 },
   },
-  stageProbabilities: { LEAD: 10, QUALIFIED: 20, GO_NO_GO: 30, PROPOSAL: 40, NEGOTIATION: 60, WON: 100, LOST: 0, CANCELLED: 0 },
+  // Same defaults as Sales (opportunities.service.ts) so the two modules never disagree.
+  stageProbabilities: { LEAD: 10, QUALIFIED: 25, GO_NO_GO: 40, PROPOSAL: 60, NEGOTIATION: 75, WON: 100, LOST: 0, CANCELLED: 0 },
   probabilitySource: 'OPPORTUNITY',
   overhead: { monthly: [], allocation: { method: 'NONE', value: '0' } },
   cash: {
