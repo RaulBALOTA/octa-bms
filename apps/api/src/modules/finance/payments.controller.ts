@@ -18,7 +18,7 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { CompanyId, RequirePermission } from '../../core/auth/decorators';
+import { CompanyId, RequirePermission, RequireRecentAuth } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
 
@@ -77,6 +77,8 @@ export class PaymentsController {
   }
 
   @Post('bank-accounts')
+  // a new IBAN is a payment destination: require a recent second factor (step-up)
+  @RequireRecentAuth()
   @RequirePermission('finance.payments.create')
   createBankAccount(
     @CompanyId() companyId: string,

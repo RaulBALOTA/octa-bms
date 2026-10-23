@@ -79,9 +79,9 @@ password `ChangeMe!2026` for six accounts.
 
 ## 3. Protected surface inventory
 
-234 HTTP routes across 52 controllers (scanned with the script in
-`apps/api/test/route-inventory.ts`; the automated coverage test re-derives this list
-from Nest metadata on every run, see `AUTH_TEST_RESULTS.md`).
+234 HTTP routes before the change (270 after adding the auth/admin routes). The automated
+coverage test in `apps/api/test/auth/platform.int.spec.ts` re-derives the list from Nest
+metadata on every run; the generated map is `ROUTE_PERMISSION_MAP.md`.
 
 - **Public** before: `auth/login|refresh|logout`, `auth/oidc/*`, `health`.
 - **Authenticated without `@RequirePermission` (35 routes):** reviewed one by one:

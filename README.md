@@ -81,6 +81,15 @@ finance lists, dark mode, DE/EN).
 designer, DMS with OCR, knowledge base, Graph/Teams integration, DATEV export,
 BI dashboards, AI suite, Entra SSO. Nav items for these show a roadmap placeholder.
 
+## Authentication & security
+
+Cookie sessions with Microsoft Authenticator (TOTP) two-step verification, recovery codes,
+dual-control admin recovery and staged MFA rollout. Existing databases: run
+`pnpm --filter @octa-bms/api auth:setup --apply` (local) or apply
+`apps/api/prisma/sql/add_secure_auth.sql` after a backup, then `pnpm db:seed`.
+See [docs/security](docs/security/) — start with `AUTH_ARCHITECTURE.md` and
+`SECURITY_OPERATIONS_RUNBOOK.md`.
+
 ## House rules
 
 - **Never** run destructive database commands (`prisma db push --force-reset`,

@@ -198,7 +198,7 @@ describe('admin-assisted MFA recovery (dual control)', () => {
 });
 
 describe('#19 #25 multi-instance consistency', () => {
-  it('sessions, revocations and policy are shared by every API instance', async () => {
+  it('sessions and revocations are shared by every API instance', async () => {
     // a second, independently booted AppModule on the same database = a second node
     const node2 = await bootTestApp({}, { reuseSchemaOf: { schema: t.schema, baseUrl: t.baseUrl } });
     try {

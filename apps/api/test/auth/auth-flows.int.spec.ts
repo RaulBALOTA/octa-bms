@@ -29,7 +29,7 @@ describe('#1 #20 password sign-in is non-enumerating', () => {
     }
   });
 
-  it('accepts case/whitespace variants of the email (normalized identity)', async () => {
+  it('accepts case variants of the email (normalized identity)', async () => {
     const res = await client(t).login(w.users.staffA2.email.toUpperCase());
     expect(res.body.status).toBe('AUTHENTICATED');
   });
