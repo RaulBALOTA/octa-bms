@@ -61,6 +61,9 @@ importers:
       helmet:
         specifier: ^7.1.0
         version: 7.2.0
+      highs:
+        specifier: 1.15.4
+        version: 1.15.4
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -1903,6 +1906,10 @@ packages:
 
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
+
+  highs@1.15.4:
+    resolution: {integrity: sha512-vsC03XHDqWAVrEFUt22h8e4CDDMb+LAFa0bycjPUq2kadRigK5pNLVIlwspKvMxxVtrr4NAucZHP/CAgigxiDQ==}
+    engines: {node: '>=18'}
 
   html-parse-stringify@3.0.1:
     resolution: {integrity: sha512-KknJ50kTInJ7qIScF3jeaFRpMpE8/lfiTdzf/twXyPBLAGrLRTmkz3AdTnKeh40X8k9L2fdYwEp/42WGXIRGcg==}
@@ -4873,6 +4880,8 @@ snapshots:
   helmet@7.2.0: {}
 
   help-me@5.0.0: {}
+
+  highs@1.15.4: {}
 
   html-parse-stringify@3.0.1:
     dependencies:

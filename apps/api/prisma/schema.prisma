@@ -411,6 +411,18 @@ model Company {
   positionPlans    PositionPlan[]
   orgChartVersions OrgChartVersion[]
   staffingBudgets  StaffingBudgetScenario[]
+  engineSettings        EngineSettings?
+  engineServices        EngineService[]
+  enginePackages        EnginePackage[]
+  engineResources       EngineResource[]
+  engineAssignments     EngineAssignment[]
+  engineScenarios       EngineScenario[]
+  engineOptimizations   EngineOptimizationRun[]
+  engineAlerts          EngineAlert[]
+  engineActions         EngineAction[]
+  engineRecommendations EngineRecommendation[]
+  engineDecisions       EngineDecision[]
+  engineRecalibrations  EngineRecalibration[]
 
   @@map("companies")
 }
@@ -782,6 +794,8 @@ model BusinessPartner {
   evaluations    SupplierEvaluation[]
   purchaseOrders PurchaseOrder[]
   legalCases     LegalCase[]
+  engineResources   EngineResource[]
+  engineAssignments EngineAssignment[]
 
   @@unique([companyId, partnerNumber])
   @@index([companyId, type])
@@ -908,6 +922,7 @@ model Opportunity {
   crmActivities CrmActivity[]
   goNoGo        GoNoGoEvaluation?
   competitors   OpportunityCompetitor[]
+  engineAssignments EngineAssignment[]
 
   @@unique([companyId, opportunityNumber])
   @@index([companyId, stage])
@@ -1106,6 +1121,7 @@ model Contract {
   variations   VariationOrder[]
   claims       Claim[]
   guarantees   BankGuarantee[]
+  engineAssignments EngineAssignment[]
 
   @@unique([companyId, contractNumber])
   @@index([companyId, status])
@@ -1469,6 +1485,9 @@ model Employee {
   managedProposals   Proposal[]
   ownedContracts     Contract[]
   cvProfile          CvProfile?
+  engineResources    EngineResource[]
+  ownedEngineServices EngineService[]
+  engineAssignments  EngineAssignment[]
 
   @@unique([companyId, employeeNumber])
   @@index([companyId, status])
@@ -1597,8 +1616,14 @@ model Skill {
   category String // DISCIPLINE | SOFTWARE | LANGUAGE | METHOD | SOFT_SKILL
   name     String
   nameDe   String?
+  parentId String? // hierarchy (Business Engine skills taxonomy)
 
-  employeeSkills EmployeeSkill[]
+  parent               Skill?                     @relation("SkillHierarchy", fields: [parentId], references: [id])
+  children             Skill[]                    @relation("SkillHierarchy")
+  employeeSkills       EmployeeSkill[]
+  engineRequirements   EngineServiceRequirement[]
+  engineResourceSkills EngineResourceSkill[]
+  engineDemands        EngineDemand[]
 
   @@unique([category, name])
   @@map("skills")
@@ -2784,4 +2809,649 @@ model OutboxEvent {
 
   @@index([publishedAt])
   @@map("outbox_events")
+}
+// =====================================================================
+// 18. BUSINESS ENGINE — services, resources, economics, scenarios,
+//     optimization, monitoring (docs/business-engine)
+//     Additive tables; projects are anchored on Contract (contracted) or
+//     Opportunity (pipeline) — the PMO owns project execution.
+// =====================================================================
+
+// Centralized business policies (illustrative defaults until confirmed).
+model EngineSettings {
+  id          String    @id @default(cuid())
+  companyId   String    @unique
+  version     Int       @default(1)
+  config      Json
+  confirmedAt DateTime?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company   Company                  @relation(fields: [companyId], references: [id])
+  revisions EngineSettingsRevision[]
+
+  @@map("engine_settings")
+}
+
+model EngineSettingsRevision {
+  id          String   @id @default(cuid())
+  settingsId  String
+  version     Int
+  config      Json
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  settings EngineSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+
+  @@unique([settingsId, version])
+  @@map("engine_settings_revisions")
+}
+
+model EngineService {
+  id                      String    @id @default(cuid())
+  companyId               String
+  code                    String
+  name                    String
+  description             String?
+  category                String // STRATEGY | PROJECT_MANAGEMENT | ENGINEERING | PERMITTING | PROCUREMENT | CONSTRUCTION_MANAGEMENT | COMMISSIONING | custom
+  parentId                String?
+  lifecycle               String    @default("PROPOSED") // PROPOSED | EXPERIMENTAL | COMMERCIAL | GROWING | CORE | UNDER_REVIEW | RETIRED
+  ownerEmployeeId         String?
+  targetSegments          String[]
+  projectTypes            String[]
+  contractModel           String? // e.g. HOAI-based, framework, fixed-price service contract
+  revenueModel            String    @default("TIME_AND_MATERIALS") // see FEE_MODELS
+  deliveryModel           String    @default("INTERNAL") // INTERNAL | FREELANCE | SUBCONTRACT | PARTNER | HYBRID
+  externalDeliveryAllowed Boolean   @default(true)
+  typicalDurationWeeks    Int?
+  currencyCode            String    @default("EUR")
+  targetHourlyRate        Decimal?  @db.Decimal(12, 2)
+  targetMarginPct         Decimal?  @db.Decimal(6, 2)
+  workingCapitalProfile   String? // ADVANCE | MONTHLY | MILESTONE | ON_COMPLETION
+  commercialRisk          Int? // 1-5 (management assessment)
+  technicalRisk           Int?
+  contractualRisk         Int?
+  strategicImportance     Int?
+  repeatability           Int?
+  scalability             Int?
+  crossSelling            Int?
+  referenceValue          Int?
+  version                 Int       @default(1)
+  createdById             String?
+  updatedById             String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  deletedAt               DateTime?
+
+  company         Company                       @relation(fields: [companyId], references: [id])
+  parent          EngineService?                @relation("EngineServiceHierarchy", fields: [parentId], references: [id])
+  children        EngineService[]               @relation("EngineServiceHierarchy")
+  owner           Employee?                     @relation(fields: [ownerEmployeeId], references: [id])
+  requirements    EngineServiceRequirement[]
+  lifecycleEvents EngineServiceLifecycleEvent[]
+  versions        EngineServiceVersion[]
+  packageItems    EnginePackageItem[]
+  assignments     EngineAssignment[]
+  scores          EngineServiceScore[]
+  recalibrations  EngineRecalibration[]
+
+  @@unique([companyId, code])
+  @@index([companyId, category])
+  @@map("engine_services")
+}
+
+// Typical effort profile: one line per skill/seniority (resource mix).
+model EngineServiceRequirement {
+  id               String   @id @default(cuid())
+  serviceId        String
+  skillId          String?
+  role             String // e.g. "Senior project manager"
+  seniority        String   @default("PROFESSIONAL") // JUNIOR | PROFESSIONAL | SENIOR | LEAD | PRINCIPAL
+  typicalHours     Decimal  @db.Decimal(10, 2)
+  internalSharePct Decimal  @default(100) @db.Decimal(5, 2)
+  costRate         Decimal? @db.Decimal(12, 2) // assumption override (internal)
+  externalRate     Decimal? @db.Decimal(12, 2) // assumption override (purchase)
+  billRate         Decimal? @db.Decimal(12, 2)
+  sortOrder        Int      @default(0)
+
+  service EngineService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  skill   Skill?        @relation(fields: [skillId], references: [id])
+
+  @@index([serviceId])
+  @@map("engine_service_requirements")
+}
+
+model EngineServiceLifecycleEvent {
+  id          String   @id @default(cuid())
+  serviceId   String
+  fromState   String?
+  toState     String
+  reason      String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  service EngineService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, createdAt])
+  @@map("engine_service_lifecycle_events")
+}
+
+// Immutable template snapshots (service + requirements) per version.
+model EngineServiceVersion {
+  id          String   @id @default(cuid())
+  serviceId   String
+  version     Int
+  snapshot    Json
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  service EngineService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, version])
+  @@map("engine_service_versions")
+}
+
+model EngineServiceScore {
+  id            String   @id @default(cuid())
+  serviceId     String
+  scores        Json
+  total         Decimal  @db.Decimal(6, 2)
+  confidence    Decimal  @db.Decimal(5, 4)
+  configVersion Int
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  service EngineService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, createdAt])
+  @@map("engine_service_scores")
+}
+
+model EnginePackage {
+  id          String    @id @default(cuid())
+  companyId   String
+  code        String
+  name        String
+  description String?
+  isActive    Boolean   @default(true)
+  version     Int       @default(1)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  company     Company             @relation(fields: [companyId], references: [id])
+  items       EnginePackageItem[]
+  assignments EngineAssignment[]
+
+  @@unique([companyId, code])
+  @@map("engine_packages")
+}
+
+model EnginePackageItem {
+  id          String   @id @default(cuid())
+  packageId   String
+  serviceId   String
+  hoursFactor Decimal  @default(1) @db.Decimal(6, 3)
+  feeOverride Decimal? @db.Decimal(18, 2)
+  sortOrder   Int      @default(0)
+
+  package EnginePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  service EngineService @relation(fields: [serviceId], references: [id])
+
+  @@unique([packageId, serviceId])
+  @@map("engine_package_items")
+}
+
+// Productive capacity: employees, freelancers, partners, automation.
+model EngineResource {
+  id               String    @id @default(cuid())
+  companyId        String
+  kind             String // EMPLOYEE | MANAGEMENT | PART_TIME | FREELANCER | CONSULTANT | SUBCONTRACTOR | PARTNER | ENGINEERING_OFFICE | AUTOMATION
+  status           String    @default("ACTIVE") // PLANNED | ACTIVE | INACTIVE
+  employeeId       String?
+  partnerId        String?
+  displayName      String
+  weeklyHours      Decimal   @db.Decimal(5, 2)
+  maxAllocationPct Decimal   @default(90) @db.Decimal(5, 2)
+  nonProjectPct    Decimal   @default(15) @db.Decimal(5, 2)
+  activeFrom       DateTime?
+  activeTo         DateTime?
+  location         String?
+  remoteEligible   Boolean   @default(true)
+  languages        String[]
+  restrictions     String?
+  createdById      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  company  Company                 @relation(fields: [companyId], references: [id])
+  employee Employee?               @relation(fields: [employeeId], references: [id])
+  partner  BusinessPartner?        @relation(fields: [partnerId], references: [id])
+  rates    EngineResourceRate[]
+  skills   EngineResourceSkill[]
+  absences EngineResourceAbsence[]
+  demands  EngineDemand[]
+
+  @@index([companyId, kind])
+  @@map("engine_resources")
+}
+
+// Effective-dated cost / purchase / billing rates (confidential).
+model EngineResourceRate {
+  id               String   @id @default(cuid())
+  resourceId       String
+  effectiveFrom    DateTime
+  costRate         Decimal  @db.Decimal(12, 2) // per hour: internal loaded cost or external purchase rate
+  billRate         Decimal? @db.Decimal(12, 2)
+  monthlyFixedCost Decimal? @db.Decimal(18, 2) // payroll-type fixed cost (internal resources)
+  currencyCode     String   @default("EUR")
+  note             String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+
+  resource EngineResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, effectiveFrom])
+  @@map("engine_resource_rates")
+}
+
+// Skills of non-employee resources (employees use EmployeeSkill).
+model EngineResourceSkill {
+  id         String @id @default(cuid())
+  resourceId String
+  skillId    String
+  level      Int // 1-5
+
+  resource EngineResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  skill    Skill          @relation(fields: [skillId], references: [id])
+
+  @@unique([resourceId, skillId])
+  @@map("engine_resource_skills")
+}
+
+// Non-availability beyond approved HR leave (training, bid work, partner blackout).
+model EngineResourceAbsence {
+  id         String   @id @default(cuid())
+  resourceId String
+  startDate  DateTime
+  endDate    DateTime
+  fraction   Decimal  @default(1) @db.Decimal(4, 3) // share of each working day
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  resource EngineResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@index([resourceId, startDate])
+  @@map("engine_resource_absences")
+}
+
+// Project service assignment: a service sold/offered on a contract or opportunity.
+model EngineAssignment {
+  id                    String    @id @default(cuid())
+  companyId             String
+  clientId              String
+  contractId            String?
+  opportunityId         String?
+  externalProjectRef    String? // PMO project id (stable external identifier)
+  serviceId             String
+  packageId             String?
+  title                 String
+  scope                 String?
+  deliverables          String?
+  responsibleEmployeeId String?
+  status                String    @default("PLANNED") // PLANNED | ACTIVE | ON_HOLD | COMPLETED | CANCELLED
+  startDate             DateTime
+  endDate               DateTime
+  feeModel              String // FIXED_FEE | TIME_AND_MATERIALS | DAILY_RATE | RETAINER | MILESTONE | CAPEX_PERCENT | HYBRID
+  fixedFee              Decimal?  @db.Decimal(18, 2)
+  hourlyRate            Decimal?  @db.Decimal(12, 2)
+  dailyRate             Decimal?  @db.Decimal(12, 2)
+  hoursPerDay           Decimal?  @db.Decimal(4, 2)
+  monthlyRetainer       Decimal?  @db.Decimal(18, 2)
+  capexBasis            Decimal?  @db.Decimal(18, 2) // eligible CAPEX basis as contractually defined
+  capexBasisDefinition  String?
+  capexPercent          Decimal?  @db.Decimal(6, 3)
+  billing               String    @default("MONTHLY") // MONTHLY | MILESTONE | UPFRONT | ON_COMPLETION
+  paymentTermDays       Int?
+  vatRatePct            Decimal?  @db.Decimal(5, 2)
+  currencyCode          String    @default("EUR")
+  travelCost            Decimal   @default(0) @db.Decimal(18, 2)
+  softwareCost          Decimal   @default(0) @db.Decimal(18, 2)
+  otherCost             Decimal   @default(0) @db.Decimal(18, 2)
+  subcontractFixedCost  Decimal   @default(0) @db.Decimal(18, 2)
+  probabilityOverride   Int? // % approved override for pipeline items
+  probabilityNote       String?
+  exclusiveGroup        String? // mutually exclusive alternatives
+  shiftableWeeks        Int       @default(0) // permissible schedule shift for optimization
+  actualHours           Decimal   @default(0) @db.Decimal(12, 2)
+  actualCost            Decimal   @default(0) @db.Decimal(18, 2)
+  actualRevenue         Decimal   @default(0) @db.Decimal(18, 2)
+  percentComplete       Decimal?  @db.Decimal(5, 2)
+  actualsAsOf           DateTime?
+  risks                 String?
+  assumptions           String?
+  version               Int       @default(1)
+  createdById           String?
+  updatedById           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
+
+  company     Company                 @relation(fields: [companyId], references: [id])
+  client      BusinessPartner         @relation(fields: [clientId], references: [id])
+  contract    Contract?               @relation(fields: [contractId], references: [id])
+  opportunity Opportunity?            @relation(fields: [opportunityId], references: [id])
+  service     EngineService           @relation(fields: [serviceId], references: [id])
+  package     EnginePackage?          @relation(fields: [packageId], references: [id])
+  responsible Employee?               @relation(fields: [responsibleEmployeeId], references: [id])
+  demands     EngineDemand[]
+  milestones  EngineMilestone[]
+  adjustments EngineAdjustment[]
+  forecasts   EngineForecastVersion[]
+
+  @@index([companyId, status])
+  @@index([contractId])
+  @@index([opportunityId])
+  @@index([companyId, externalProjectRef])
+  @@map("engine_assignments")
+}
+
+// Skill-based or named resource demand (unfilled = resourceId null).
+model EngineDemand {
+  id             String    @id @default(cuid())
+  assignmentId   String
+  skillId        String?
+  role           String
+  seniority      String    @default("PROFESSIONAL")
+  hours          Decimal   @db.Decimal(10, 2)
+  startDate      DateTime?
+  endDate        DateTime?
+  resourceId     String?
+  sourcing       String    @default("INTERNAL") // INTERNAL | EXTERNAL
+  billable       Boolean   @default(true)
+  costRate       Decimal?  @db.Decimal(12, 2)
+  externalRate   Decimal?  @db.Decimal(12, 2)
+  location       String?
+  actualHours    Decimal   @default(0) @db.Decimal(10, 2)
+  remainingHours Decimal?  @db.Decimal(10, 2)
+  source         String    @default("MANUAL") // TEMPLATE | PACKAGE | MANUAL | BENCHMARK | PMO
+  overrideNote   String?
+  sortOrder      Int       @default(0)
+
+  assignment EngineAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  skill      Skill?           @relation(fields: [skillId], references: [id])
+  resource   EngineResource?  @relation(fields: [resourceId], references: [id])
+
+  @@index([assignmentId])
+  @@index([resourceId])
+  @@map("engine_demands")
+}
+
+model EngineMilestone {
+  id           String   @id @default(cuid())
+  assignmentId String
+  title        String
+  dueDate      DateTime
+  amount       Decimal  @db.Decimal(18, 2)
+  isInvoiced   Boolean  @default(false)
+
+  assignment EngineAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId])
+  @@map("engine_milestones")
+}
+
+// Contract amendments / approved scope changes affecting revenue.
+model EngineAdjustment {
+  id            String   @id @default(cuid())
+  assignmentId  String
+  effectiveDate DateTime
+  amount        Decimal  @db.Decimal(18, 2)
+  kind          String   @default("SCOPE_CHANGE") // SCOPE_CHANGE | AMENDMENT | VARIATION
+  note          String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  assignment EngineAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId])
+  @@map("engine_adjustments")
+}
+
+// Immutable economics snapshots: ESTIMATE | CONTRACT_BASELINE | APPROVED_BUDGET | FORECAST | ACTUAL
+model EngineForecastVersion {
+  id            String   @id @default(cuid())
+  assignmentId  String
+  kind          String
+  version       Int
+  snapshot      Json
+  engineVersion String
+  note          String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  assignment EngineAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, version])
+  @@index([assignmentId, kind])
+  @@map("engine_forecast_versions")
+}
+
+model EngineScenario {
+  id           String    @id @default(cuid())
+  companyId    String
+  name         String
+  description  String?
+  status       String    @default("DRAFT") // DRAFT | ACTIVE | APPROVED | ARCHIVED
+  mode         String    @default("EXPECTED") // CONTRACTED | EXPECTED | ALL_WIN
+  operations   Json
+  version      Int       @default(1)
+  copiedFromId String?
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  company Company             @relation(fields: [companyId], references: [id])
+  runs    EngineScenarioRun[]
+
+  @@index([companyId, status])
+  @@map("engine_scenarios")
+}
+
+// Reproducible run: full input snapshot + operations + config + engine version.
+model EngineScenarioRun {
+  id              String    @id @default(cuid())
+  scenarioId      String
+  scenarioVersion Int
+  kind            String    @default("DETERMINISTIC") // DETERMINISTIC | MONTE_CARLO | SENSITIVITY
+  status          String    @default("RUNNING") // RUNNING | SUCCEEDED | FAILED | CANCELLED
+  engineVersion   String
+  seed            Int?
+  parameters      Json?
+  inputSnapshot   Json
+  operations      Json
+  result          Json?
+  error           String?
+  runtimeMs       Int?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  finishedAt      DateTime?
+
+  scenario EngineScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId, createdAt])
+  @@map("engine_scenario_runs")
+}
+
+model EngineOptimizationRun {
+  id             String    @id @default(cuid())
+  companyId      String
+  name           String?
+  status         String    @default("RUNNING") // RUNNING | OPTIMAL | FEASIBLE | INFEASIBLE | TIMED_OUT | FAILED | CANCELLED
+  configuration  Json
+  inputSnapshot  Json
+  result         Json?
+  objectiveValue Decimal?  @db.Decimal(20, 2)
+  bound          Decimal?  @db.Decimal(20, 2)
+  gapPct         Decimal?  @db.Decimal(9, 4)
+  runtimeMs      Int?
+  engineVersion  String
+  error          String?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@map("engine_optimization_runs")
+}
+
+model EngineAlert {
+  id               String    @id @default(cuid())
+  companyId        String
+  ruleCode         String
+  severity         String // INFO | WARNING | CRITICAL
+  entityType       String
+  entityId         String
+  dedupeKey        String
+  title            String
+  detail           String?
+  metric           Json?
+  ownerUserId      String?
+  status           String    @default("OPEN") // OPEN | ACKNOWLEDGED | RESOLVED
+  detectedAt       DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+  resolvedAt       DateTime?
+  resolvedById     String?
+  resolution       String?
+
+  company Company        @relation(fields: [companyId], references: [id])
+  actions EngineAction[]
+
+  @@index([companyId, status])
+  @@index([companyId, dedupeKey])
+  @@map("engine_alerts")
+}
+
+model EngineAction {
+  id          String    @id @default(cuid())
+  companyId   String
+  alertId     String?
+  kind        String // REFORECAST | REALLOCATE | REPRICE | RENEGOTIATE | SUBCONTRACT | RECOVER_INVOICE | ESCALATE | CHANGE_PLAN
+  title       String
+  description String?
+  entityType  String?
+  entityId    String?
+  ownerUserId String?
+  dueDate     DateTime?
+  status      String    @default("OPEN") // OPEN | IN_PROGRESS | DONE | CANCELLED
+  outcome     String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company Company      @relation(fields: [companyId], references: [id])
+  alert   EngineAlert? @relation(fields: [alertId], references: [id])
+
+  @@index([companyId, status])
+  @@map("engine_actions")
+}
+
+model EngineRecommendation {
+  id               String   @id @default(cuid())
+  companyId        String
+  source           String // RULE | AI | OPTIMIZER | SCENARIO
+  title            String
+  problem          String
+  evidence         Json
+  proposedAction   String
+  estimatedBenefit String?
+  assumptions      String?
+  confidence       String // LOW | MEDIUM | HIGH
+  risks            String?
+  responsibleRole  String?
+  priority         String // LOW | MEDIUM | HIGH
+  status           String   @default("PROPOSED") // PROPOSED | ACCEPTED | DISMISSED
+  refs             Json?
+  aiModel          String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company   Company          @relation(fields: [companyId], references: [id])
+  decisions EngineDecision[]
+
+  @@index([companyId, status])
+  @@map("engine_recommendations")
+}
+
+model EngineDecision {
+  id                String    @id @default(cuid())
+  companyId         String
+  title             String
+  context           String?
+  status            String    @default("DRAFT") // DRAFT | UNDER_REVIEW | APPROVED | REJECTED | IMPLEMENTED | SUPERSEDED
+  recommendationId  String?
+  scenarioId        String?
+  optimizationRunId String?
+  expectedImpact    Json?
+  actualOutcome     String?
+  outcomeRecordedAt DateTime?
+  createdById       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  company        Company               @relation(fields: [companyId], references: [id])
+  recommendation EngineRecommendation? @relation(fields: [recommendationId], references: [id])
+  events         EngineDecisionEvent[]
+
+  @@index([companyId, status])
+  @@map("engine_decisions")
+}
+
+model EngineDecisionEvent {
+  id          String   @id @default(cuid())
+  decisionId  String
+  fromStatus  String?
+  toStatus    String
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  decision EngineDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+
+  @@index([decisionId, createdAt])
+  @@map("engine_decision_events")
+}
+
+// Benchmark-based proposal to update a service template (never auto-applied).
+model EngineRecalibration {
+  id            String    @id @default(cuid())
+  companyId     String
+  serviceId     String
+  metric        String // EFFORT_HOURS
+  currentValue  Decimal   @db.Decimal(14, 2)
+  proposedValue Decimal   @db.Decimal(14, 2)
+  sampleCount   Int
+  statistics    Json
+  status        String    @default("PROPOSED") // PROPOSED | APPROVED | REJECTED
+  decidedById   String?
+  decidedAt     DateTime?
+  note          String?
+  createdAt     DateTime  @default(now())
+
+  company Company       @relation(fields: [companyId], references: [id])
+  service EngineService @relation(fields: [serviceId], references: [id])
+
+  @@index([companyId, status])
+  @@map("engine_recalibrations")
 }

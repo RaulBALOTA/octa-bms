@@ -15,6 +15,11 @@
   --destructive: 0 72% 51%;
   --success: 142 71% 38%;
   --warning: 38 92% 45%;
+  /* Data-viz roles (validated: dataviz validate_palette.js, light surface #ffffff). Slot order is fixed. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --seq-100: #cde2fb; --seq-200: #9ec5f4; --seq-300: #6da7ec; --seq-400: #3987e5; --seq-500: #256abf; --seq-600: #184f95;
 }
 
 .dark {
@@ -30,6 +35,11 @@
   --destructive: 0 72% 55%;
   --success: 142 60% 45%;
   --warning: 38 92% 55%;
+  /* Same hues stepped for the dark surface (validated vs #181c25). */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --seq-100: #104281; --seq-200: #184f95; --seq-300: #1c5cab; --seq-400: #256abf; --seq-500: #3987e5; --seq-600: #6da7ec;
 }
 
 body {
