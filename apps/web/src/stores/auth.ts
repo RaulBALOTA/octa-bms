@@ -9,6 +9,10 @@ interface CompanyRef {
 
 export interface MfaSummary {
   enrolled: boolean;
+  totp?: boolean;
+  passkeys?: number;
+  passkeyEligible?: boolean;
+  passkeyRequired?: boolean;
   enrolledAt?: string | null;
   lastUsedAt?: string | null;
   recoveryCodesRemaining: number;

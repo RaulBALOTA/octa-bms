@@ -5,8 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/ui';
 import { AuthRequestError, safeNext, useAuthStore } from '../../stores/auth';
-import { requestStepUp } from '../../stores/step-up';
-import { AuthCard, FormError, LabeledInput, Notice, OtpInput, PasswordInput, RecoveryCodesPanel } from './components';
+import { requestStepUp, type StepUpMethod } from '../../stores/step-up';
+import { AuthCard, FormError, LabeledInput, Notice, OtpInput, passkeyCeremony, PasswordInput, RecoveryCodesPanel } from './components';
 
 interface ErrorBody { code?: string; message?: string; retryAfterSeconds?: number; attemptsRemaining?: number }
 
@@ -14,8 +14,8 @@ interface ErrorBody { code?: string; message?: string; retryAfterSeconds?: numbe
 async function withStepUp<T>(call: () => ReturnType<typeof authPost<T>>) {
   const first = await call();
   if (first.ok || first.body.code !== 'STEP_UP_REQUIRED') return first;
-  const method = (first.body as { method?: 'totp' | 'password' }).method ?? 'password';
-  return (await requestStepUp(method)) ? call() : first;
+  const { method = 'password', methods } = first.body as { method?: StepUpMethod; methods?: StepUpMethod[] };
+  return (await requestStepUp(method, methods)) ? call() : first;
 }
 
 /** POST for the sign-in flow: sends the CSRF token of the current challenge/session, never retries. */
@@ -130,12 +130,31 @@ export function MfaPage() {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const methods = useQuery({
+    queryKey: ['mfa-methods'],
+    enabled: status === 'MFA_PENDING',
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch('/api/v1/auth/mfa/methods', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('expired');
+      return (await res.json()) as { totp: boolean; passkey: boolean; passkeyRequired: boolean; recoveryCode: boolean };
+    },
+  });
 
   useEffect(() => { void refreshState(); }, [refreshState]);
   useEffect(() => {
     if (status === 'AUTHENTICATED') navigate(next, { replace: true });
     if (status === 'MFA_ENROLLMENT_REQUIRED') navigate(`/auth/setup-mfa?next=${encodeURIComponent(next)}`, { replace: true });
   }, [status, navigate, next]);
+
+  async function withPasskey() {
+    setBusy(true);
+    setError(null);
+    const result = await passkeyCeremony<{ status: 'AUTHENTICATED'; csrfToken: string }>('/auth/mfa/passkey/options', '/auth/mfa/passkey/verify');
+    setBusy(false);
+    if (result.ok) applyResult(result.body);
+    else setError(t(result.error));
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -164,12 +183,25 @@ export function MfaPage() {
   }
   return (
     <AuthCard title={t('auth.mfa.title')} icon={<Smartphone size={18} aria-hidden />}>
-      <p className="mb-4 text-sm text-muted-foreground">{t('auth.mfa.prompt')}</p>
-      <form onSubmit={submit}>
-        <FormError message={error} />
-        <OtpInput value={code} onChange={setCode} label={t('auth.mfa.codeLabel')} disabled={busy} />
-        <Button type="submit" className="w-full" disabled={busy || code.length !== 6}>{busy ? t('auth.mfa.verifying') : t('auth.verify')}</Button>
-      </form>
+      <FormError message={error} />
+      {methods.data?.passkey && (
+        <div className="mb-4">
+          <p className="mb-3 text-sm text-muted-foreground">{methods.data.passkeyRequired ? t('auth.mfa.passkeyRequired') : t('auth.mfa.passkeyPrompt')}</p>
+          <Button type="button" className="w-full" onClick={() => void withPasskey()} disabled={busy}>
+            <KeyRound size={14} aria-hidden />{t('auth.mfa.usePasskey')}
+          </Button>
+        </div>
+      )}
+      {(methods.data?.totp ?? !methods.data) && (
+        <>
+          {methods.data?.passkey && <p className="mb-3 text-center text-xs text-muted-foreground">{t('auth.mfa.orCode')}</p>}
+          <p className="mb-4 text-sm text-muted-foreground">{t('auth.mfa.prompt')}</p>
+          <form onSubmit={submit}>
+            <OtpInput value={code} onChange={setCode} label={t('auth.mfa.codeLabel')} disabled={busy} autoFocus={!methods.data?.passkey} />
+            <Button type="submit" className="w-full" variant={methods.data?.passkey ? 'secondary' : 'primary'} disabled={busy || code.length !== 6}>{busy ? t('auth.mfa.verifying') : t('auth.verify')}</Button>
+          </form>
+        </>
+      )}
       <div className="mt-4 flex flex-col gap-1 text-center text-sm">
         <Link to={`/auth/recovery?next=${encodeURIComponent(next)}`} className="text-primary hover:underline">{t('auth.mfa.useRecovery')}</Link>
         <Link to="/login" className="text-muted-foreground hover:underline">{t('auth.backToLogin')}</Link>

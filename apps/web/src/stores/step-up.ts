@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 
-export type StepUpMethod = 'totp' | 'password';
+export type StepUpMethod = 'totp' | 'password' | 'passkey';
 
 interface StepUpState {
   open: boolean;
   method: StepUpMethod;
+  methods: StepUpMethod[];
   resolve: ((ok: boolean) => void) | null;
   finish: (ok: boolean) => void;
 }
@@ -13,6 +14,7 @@ interface StepUpState {
 export const useStepUpStore = create<StepUpState>()((set, get) => ({
   open: false,
   method: 'totp',
+  methods: ['totp'],
   resolve: null,
   finish(ok) {
     get().resolve?.(ok);
@@ -23,9 +25,9 @@ export const useStepUpStore = create<StepUpState>()((set, get) => ({
 let pending: Promise<boolean> | null = null;
 
 /** Opens the dialog (once, even for parallel requests) and resolves when the user finishes. */
-export function requestStepUp(method: StepUpMethod): Promise<boolean> {
+export function requestStepUp(method: StepUpMethod, methods: StepUpMethod[] = [method]): Promise<boolean> {
   pending ??= new Promise<boolean>((resolve) => {
-    useStepUpStore.setState({ open: true, method, resolve: (ok) => { pending = null; resolve(ok); } });
+    useStepUpStore.setState({ open: true, method, methods, resolve: (ok) => { pending = null; resolve(ok); } });
   });
   return pending;
 }

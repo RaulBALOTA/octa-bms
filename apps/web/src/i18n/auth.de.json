@@ -31,7 +31,14 @@
     "expired": "Dieser Anmeldeversuch ist abgelaufen. Bitte melden Sie sich erneut an.",
     "useRecovery": "Stattdessen einen Wiederherstellungscode verwenden",
     "useAuthenticator": "Stattdessen die Authenticator-App verwenden",
-    "verifying": "Wird geprüft…"
+    "verifying": "Wird geprüft…",
+    "usePasskey": "Mit Passkey anmelden",
+    "passkeyPrompt": "Verwenden Sie Ihren Passkey (Sicherheitsschlüssel, Windows Hello, Touch ID oder Smartphone), um die Anmeldung abzuschließen.",
+    "passkeyRequired": "Ihre Organisation verlangt für Administratorkonten einen Passkey.",
+    "passkeyFailed": "Der Passkey konnte nicht geprüft werden. Bitte erneut versuchen.",
+    "passkeyCancelled": "Passkey-Abfrage wurde geschlossen.",
+    "passkeyUnsupported": "Dieser Browser unterstützt keine Passkeys.",
+    "orCode": "oder Code eingeben"
   },
   "recovery": {
     "title": "Wiederherstellungscode verwenden",
@@ -96,7 +103,9 @@
     "title": "Identität bestätigen",
     "totp": "Geben Sie den aktuellen Code aus Microsoft Authenticator ein, um fortzufahren.",
     "password": "Geben Sie Ihr Passwort ein, um fortzufahren.",
-    "invalid": "Verifizierung fehlgeschlagen."
+    "invalid": "Verifizierung fehlgeschlagen.",
+    "passkey": "Bestätigen Sie mit Ihrem Passkey, um fortzufahren.",
+    "usePasskey": "Passkey verwenden"
   },
   "security": {
     "title": "Sicherheit",
@@ -182,6 +191,68 @@
     "action": "Ereignis",
     "outcome": "Ergebnis",
     "when": "Zeitpunkt",
-    "none": "Keine Einträge"
+    "none": "Keine Einträge",
+    "passkeys": "Passkeys"
+  },
+  "passkeys": {
+    "title": "Passkeys",
+    "intro": "Phishing-resistente Anmeldung für Administratoren: Sicherheitsschlüssel, Windows Hello, Touch ID / Face ID oder ein Smartphone. Der private Schlüssel verlässt Ihr Gerät nie.",
+    "add": "Passkey hinzufügen",
+    "name": "Name",
+    "namePlaceholder": "z. B. YubiKey, MacBook Touch ID",
+    "added": "Passkey hinzugefügt",
+    "removed": "Passkey entfernt",
+    "remove": "Entfernen",
+    "rename": "Umbenennen",
+    "synced": "Synchronisiert",
+    "deviceBound": "Nur dieses Gerät",
+    "created": "Hinzugefügt {{date}}",
+    "lastUsed": "Zuletzt verwendet {{date}}",
+    "never": "nie",
+    "none": "Noch keine Passkeys.",
+    "required": "Von Ihrer Organisation vorgeschrieben — mindestens einen behalten.",
+    "unsupported": "Dieser Browser unterstützt keine Passkeys."
+  },
+  "mfaConfig": {
+    "title": "MFA-Konfiguration",
+    "link": "MFA konfigurieren",
+    "intro": "Organisationsweite Einstellungen für die Zwei-Schritt-Verifizierung. Änderungen gelten innerhalb von 15 Sekunden auf allen API-Instanzen und werden im Sicherheitsprotokoll erfasst.",
+    "readOnly": "Nur Systemadministratoren können diese Einstellungen ändern.",
+    "readiness": "Bereitschaft für die Einführung",
+    "checkAdmins": "Mindestens zwei Systemadministratoren haben einen zweiten Faktor ({{count}})",
+    "checkAdminPasskeys": "Systemadministratoren mit Passkey: {{with}} von {{total}}",
+    "checkEnrollment": "Eingerichtete Benutzer: {{enrolled}} von {{users}}",
+    "checkEmail": "Versand von Sicherheits-E-Mails konfiguriert",
+    "checkKey": "Produktiver Verschlüsselungsschlüssel aktiv",
+    "modeTitle": "Durchsetzung",
+    "modeHelp": {
+      "DISABLED": "Keine Einrichtung angeboten. Vorhandene Faktoren werden weiterhin geprüft.",
+      "OPTIONAL": "Einrichtung freiwillig; eingerichtete Benutzer werden immer geprüft.",
+      "ENROLLMENT_REQUIRED": "Alle müssen einrichten; voller Zugriff bis zur Frist, danach nur Einrichtung.",
+      "ENFORCED": "Benutzer ohne Faktor erreichen nur die Einrichtungsseite."
+    },
+    "methodsTitle": "Methoden",
+    "totpTitle": "Authenticator-App (TOTP)",
+    "totpDetail": "Kompatibel mit Microsoft Authenticator · {{algorithm}} · {{digits}} Ziffern · {{period}} s · ±{{window}} Schritt · Aussteller „{{issuer}}“",
+    "alwaysOn": "Immer verfügbar",
+    "passkeysTitle": "Passkeys für Administratoren",
+    "passkeysDetail": "WebAuthn / FIDO2 · Relying Party {{rpId}} · Benutzerverifizierung erforderlich",
+    "passkeysEnabled": "Passkeys erlauben",
+    "requirePasskeys": "Passkeys für Systemadministratoren verlangen",
+    "requirePasskeysHelp": "Administratoren mit Passkey können keine Authenticator-Codes mehr verwenden. Wiederherstellungscodes bleiben verfügbar. Setzt voraus, dass alle Systemadministratoren (mindestens zwei) einen Passkey haben.",
+    "recoveryTitle": "Wiederherstellungscodes",
+    "recoveryDetail": "10 Einmal-Codes pro Benutzer, nur einmal angezeigt; Zurücksetzen durch Admins braucht eine zweite Person.",
+    "sessionsTitle": "Sitzungen und erneute Verifizierung",
+    "stepUp": "Gültigkeit der erneuten Verifizierung (Minuten)",
+    "stepUpHelp": "Wie lange eine Prüfung des zweiten Faktors für sensible Aktionen gilt (Rollen, Richtlinie, Passwörter).",
+    "save": "Konfiguration speichern",
+    "saved": "MFA-Konfiguration gespeichert",
+    "unsaved": "Ungespeicherte Änderungen",
+    "defaultFromEnv": "Standard aus der Serverkonfiguration: {{value}}",
+    "fixedTitle": "Feste Servereinstellungen",
+    "challengeTtl": "Anmeldeabfrage: {{seconds}} s, {{attempts}} Versuche",
+    "passwordPolicy": "Passwörter: mindestens {{min}} Zeichen{{breached}}",
+    "breached": ", Prüfung auf geleakte Passwörter aktiv",
+    "pilotLink": "Pilotbenutzer werden im Tab „Benutzer“ der Sicherheitsverwaltung ausgewählt."
   }
 }

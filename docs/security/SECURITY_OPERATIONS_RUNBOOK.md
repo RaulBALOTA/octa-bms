@@ -33,6 +33,10 @@ against a running API on a disposable database.
 | 3 | Pilot: Admin → Security → users → **Require MFA (pilot)** for 5–10 staff | ≥ 90 % pilot enrolled, helpdesk issues resolved |
 | 4 | Mode **Enrollment required** with a deadline 2–4 weeks out; announce | enrollment rate on the dashboard; follow up with "not enrolled" users |
 | 5 | Mode **Enforced** (UI refuses unless ≥ 2 admins have MFA) | unenrolled users can only reach the enrollment screen |
+| 6 | Every system administrator registers **two passkeys** (e.g. a hardware key kept in the safe + a platform passkey) on Security → Passkeys | `/admin/security/mfa` readiness shows all admins with a passkey |
+| 7 | MFA configuration → **Require passkeys for system administrators** (UI refuses until every admin ≥ 2 has one) | admins sign in with passkeys only; recovery codes tested once |
+
+All settings live on **Admin → Security administration → Configure MFA** (`/admin/security/mfa`).
 
 Rollback at any step: set mode back to `Optional` (takes effect ≤ 15 s per API instance).
 
@@ -53,6 +57,15 @@ Rollback at any step: set mode back to `Optional` (takes effect ≤ 15 s per API
 * **Compromised key:** rotate immediately *and* treat all seeds as exposed: set policy to
   `Optional`, reset MFA for everyone (break-glass per user or SQL in a reviewed change),
   require re-enrollment.
+
+## 3a. Passkeys
+
+* RP ID = host of `APP_PUBLIC_ORIGIN` (or `WEBAUTHN_RP_ID`). **Changing the domain or RP ID
+  invalidates every passkey** — plan a re-registration window (admins fall back to recovery
+  codes; temporarily switch off "require passkeys").
+* Lost passkey: use another registered passkey or a recovery code, then remove the lost one
+  under Security → Passkeys. Lost everything: in-app recovery request (also revokes passkeys).
+* Inventory: `pnpm --filter @octa-bms/api auth:admin list-admins` shows TOTP / passkeys / codes.
 
 ## 4. Helpdesk: locked-out user
 

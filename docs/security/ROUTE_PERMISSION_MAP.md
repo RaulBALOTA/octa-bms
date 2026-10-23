@@ -12,6 +12,7 @@ permissions, policy update restricted to system administrators in code).
 
 | Method | Route (/api/v1) | Authentication | Permission | Step-up |
 |---|---|---|---|---|
+| GET | `/admin/security/config` | session | identity.security.read |  |
 | GET | `/admin/security/events` | session | admin.audit.read |  |
 | GET | `/admin/security/invitations` | session | identity.users.read |  |
 | POST | `/admin/security/invitations` | session | identity.users.create | yes |
@@ -47,11 +48,19 @@ permissions, policy update restricted to system administrators in code).
 | POST | `/auth/mfa/disable` | session | self-service / in-code check | yes |
 | POST | `/auth/mfa/enroll/confirm` | session or pre-auth | self-service / in-code check |  |
 | POST | `/auth/mfa/enroll/start` | session or pre-auth | self-service / in-code check |  |
+| GET | `/auth/mfa/methods` | session or pre-auth | self-service / in-code check |  |
+| POST | `/auth/mfa/passkey/options` | session or pre-auth | self-service / in-code check |  |
+| POST | `/auth/mfa/passkey/verify` | session or pre-auth | self-service / in-code check |  |
 | POST | `/auth/mfa/recovery` | session or pre-auth | self-service / in-code check |  |
 | POST | `/auth/mfa/verify` | session or pre-auth | self-service / in-code check |  |
 | GET | `/auth/oidc/callback` | public | — |  |
 | GET | `/auth/oidc/login` | public | — |  |
 | GET | `/auth/oidc/status` | public | — |  |
+| GET | `/auth/passkeys` | session | self-service / in-code check |  |
+| DELETE | `/auth/passkeys/:id` | session | self-service / in-code check | yes |
+| PATCH | `/auth/passkeys/:id` | session | self-service / in-code check |  |
+| POST | `/auth/passkeys/register/options` | session | self-service / in-code check | yes |
+| POST | `/auth/passkeys/register/verify` | session | self-service / in-code check | yes |
 | POST | `/auth/password/change` | session | self-service / in-code check | yes |
 | POST | `/auth/password/forgot` | public | — |  |
 | POST | `/auth/password/reset` | public | — |  |
@@ -62,6 +71,8 @@ permissions, policy update restricted to system administrators in code).
 | DELETE | `/auth/sessions/:id` | session | self-service / in-code check |  |
 | GET | `/auth/state` | public | — |  |
 | GET | `/auth/step-up` | session | self-service / in-code check |  |
+| POST | `/auth/step-up/passkey/options` | session | self-service / in-code check |  |
+| POST | `/auth/step-up/passkey/verify` | session | self-service / in-code check |  |
 | POST | `/auth/step-up/start` | session | self-service / in-code check |  |
 | POST | `/auth/step-up/verify` | session | self-service / in-code check |  |
 | GET | `/bi/reports` | session | bi.reports.read |  |

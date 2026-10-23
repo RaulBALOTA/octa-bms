@@ -29,5 +29,7 @@ deployment · **O** open (accepted or follow-up).
 | T17 | Secret leakage via logs | pino redaction of cookies, auth headers, `password`, `code`, `token`, `recoveryCode`, `secret`, `otpauthUri`; security events store sanitized context only | M (tested) |
 | T18 | Multi-instance races / stale revocation | Sessions, rate limits, challenges, OTP steps all in Postgres with atomic statements; every request validates the session row (no cache) | M (RBAC permission cache remains 60 s per process — documented) |
 | T19 | Clock skew | Server time only; ±1 step window; NTP is a deployment prerequisite | P |
-| T20 | TOTP phishing (real-time relay) | **Not mitigated by TOTP.** Short challenge TTL and notifications only. WebAuthn/passkeys are the follow-up. | O |
+| T20 | TOTP phishing (real-time relay) | Passkeys (origin/RP-ID bound) for administrators; policy can refuse TOTP for admins. Staff on TOTP: short challenge TTL and notifications only | P (admins: M once `requirePasskeyForAdmins` is on; staff: O) |
 | T21 | Insider admin reading seeds/codes | No API returns seeds after enrollment or recovery codes after display; admins only see counts/status | M |
+| T22 | Passkey ceremony replay / cross-account use | single-use challenge bound to session or pre-auth challenge, consumed before verify; credential must belong to the user; UV required; counter tracked | M |
+| T23 | Admin locks themselves out by requiring passkeys | requirement only when every admin (≥2) has one; last admin passkey/factor cannot be removed; recovery codes + dual-control reset + break-glass still work | M |

@@ -124,3 +124,70 @@ test('auth pages are keyboard-operable and German strings are available', async 
   await page.getByRole('link', { name: 'Passwort vergessen?' }).click();
   await expect(page.getByRole('heading', { name: 'Passwort zurücksetzen' })).toBeVisible();
 });
+
+async function mockAdminApi(page: Page, opts: { systemAdmin: boolean; rejectWith?: string }) {
+  const saved: unknown[] = [];
+  const policy = { mfaMode: 'OPTIONAL', enrollmentDeadline: null, sessionIdleMinutes: 60, sessionAbsoluteHours: 12, stepUpMaxAgeMinutes: 10, passkeysEnabled: true, requirePasskeyForAdmins: false, source: 'environment' };
+  await page.addInitScript(() => localStorage.setItem('octa-bms-lang', 'en'));
+  await page.route('**/api/v1/**', async (route: Route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname.replace('/api/v1', '');
+    const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
+    if (path === '/auth/state') return json({ state: 'AUTHENTICATED', csrfToken: 'csrf-admin' });
+    if (path === '/auth/me') return json({ id: 'a1', email: 'admin@octa.test', firstName: 'Ada', lastName: 'Admin', isSystemAdmin: opts.systemAdmin, permissions: ['identity.security.read'], memberships: [{ isDefault: true, company: { id: 'c', code: 'C', name: 'Company' } }], mfa: { enrolled: true, totp: true, passkeys: 1, recoveryCodesRemaining: 10, required: true, passkeyEligible: true } });
+    if (path === '/admin/security/overview') return json({ users: 12, enrolled: 9, notEnrolled: 3, pendingEnrollments: 1, activeSessions: 4, pendingRecovery: 0, enrolledAdmins: 2, systemAdmins: 2, adminsWithPasskey: 1, policy });
+    if (path === '/admin/security/config') return json({ totp: { issuer: 'OCTA BMS', algorithm: 'SHA1', digits: 6, periodSeconds: 30, windowSteps: 1 }, challenge: { preAuthTtlSeconds: 300, enrollTtlSeconds: 900, maxAttempts: 5 }, sessionDefaults: { idleMinutes: 60, absoluteHours: 12, stepUpMaxAgeMinutes: 10 }, passkeys: { rpId: 'localhost', rpName: 'OCTA BMS', userVerification: 'required', attestation: 'none' }, passwords: { minLength: 12, breachedCheck: false }, email: { configured: true }, encryptionKey: { id: 'dev-insecure', development: true } });
+    if (path === '/admin/security/policy' && req.method() === 'PATCH') {
+      saved.push({ body: req.postDataJSON(), csrf: req.headers()['x-csrf-token'] });
+      if (opts.rejectWith) return json({ statusCode: 409, code: 'POLICY_CHANGE_REJECTED', message: opts.rejectWith }, 409);
+      Object.assign(policy, req.postDataJSON(), { source: 'database' });
+      return json(policy);
+    }
+    return json(path.endsWith('unread-count') ? { count: 0 } : []);
+  });
+  return saved;
+}
+
+test('MFA configuration page: readiness, mode, methods and saving', async ({ page }) => {
+  const saved = await mockAdminApi(page, { systemAdmin: true });
+  await page.goto('/admin/security/mfa');
+  await expect(page.getByRole('heading', { name: 'MFA configuration' })).toBeVisible();
+  await expect(page.getByText('At least two system administrators have a second factor (2)')).toBeVisible();
+  await expect(page.getByText('System administrators with a passkey: 1 of 2')).toBeVisible();
+  await expect(page.getByText(/Microsoft Authenticator compatible · SHA1 · 6 digits · 30 s/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save configuration' })).toBeDisabled();
+
+  await page.getByRole('radio', { name: /Enrollment required/ }).check();
+  await page.getByLabel('Enrollment deadline').fill('2026-12-01T09:00');
+  await page.getByRole('switch', { name: 'Require passkeys for system administrators' }).check();
+  await page.getByLabel('Re-verification window (minutes)').fill('5');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  // turning passkeys off also clears the admin requirement
+  await page.getByRole('switch', { name: 'Allow passkeys' }).uncheck();
+  await expect(page.getByRole('switch', { name: 'Require passkeys for system administrators' })).not.toBeChecked();
+  await expect(page.getByRole('switch', { name: 'Require passkeys for system administrators' })).toBeDisabled();
+  await page.getByRole('switch', { name: 'Allow passkeys' }).check();
+  await page.getByRole('switch', { name: 'Require passkeys for system administrators' }).check();
+  await page.getByRole('button', { name: 'Save configuration' }).click();
+  await expect(page.getByText('MFA configuration saved')).toBeVisible();
+  expect(saved).toHaveLength(1);
+  expect(saved[0]).toMatchObject({
+    csrf: 'csrf-admin',
+    body: { mfaMode: 'ENROLLMENT_REQUIRED', passkeysEnabled: true, requirePasskeyForAdmins: true, stepUpMaxAgeMinutes: 5, sessionIdleMinutes: 60, sessionAbsoluteHours: 12 },
+  });
+});
+
+test('MFA configuration shows server guard-rail rejections and is read-only for non-system admins', async ({ page, context }) => {
+  await mockAdminApi(page, { systemAdmin: true, rejectWith: 'Every system administrator (at least two) must register a passkey before passkeys can be required' });
+  await page.goto('/admin/security/mfa');
+  await page.getByRole('switch', { name: 'Require passkeys for system administrators' }).check();
+  await page.getByRole('button', { name: 'Save configuration' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'must register a passkey' })).toBeVisible();
+
+  const other = await context.newPage();
+  await mockAdminApi(other, { systemAdmin: false });
+  await other.goto('/admin/security/mfa');
+  await expect(other.getByText('Only system administrators can change these settings.')).toBeVisible();
+  await expect(other.getByRole('switch', { name: 'Allow passkeys' })).toBeDisabled();
+  await expect(other.getByRole('button', { name: 'Save configuration' })).toHaveCount(0);
+});

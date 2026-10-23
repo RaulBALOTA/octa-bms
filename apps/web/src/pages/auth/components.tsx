@@ -1,5 +1,7 @@
 import clsx from 'clsx';
-import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-react';
+import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
+import { PasskeyCeremonyError, getPasskeyAssertion } from '../../lib/passkeys';
 import { FormEvent, ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setLanguage } from '../../i18n';
@@ -160,51 +162,99 @@ export function RecoveryCodesPanel({ codes, onDone }: { codes: string[]; onDone:
   );
 }
 
+/** POST helper used by the passkey ceremonies (sends the current CSRF token, no retries). */
+async function postJson<T>(path: string, body?: unknown): Promise<{ ok: boolean; body: T & { code?: string; csrfToken?: string } }> {
+  const { csrfToken } = useAuthStore.getState();
+  const res = await fetch(`/api/v1${path}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { ok: res.ok, body: (await res.json().catch(() => ({}))) as T & { code?: string; csrfToken?: string } };
+}
+
+/**
+ * Runs a WebAuthn ceremony end to end: fetch options → browser prompt → verify.
+ * Returns the verify response body, or an i18n key describing why it failed.
+ */
+export async function passkeyCeremony<T>(optionsPath: string, verifyPath: string): Promise<{ ok: true; body: T & { csrfToken?: string } } | { ok: false; error: string }> {
+  const options = await postJson<PublicKeyCredentialRequestOptionsJSON>(optionsPath);
+  if (!options.ok) return { ok: false, error: options.body.code === 'MFA_CHALLENGE_INVALID' ? 'auth.mfa.expired' : 'auth.mfa.passkeyFailed' };
+  let response;
+  try {
+    response = await getPasskeyAssertion(options.body);
+  } catch (error) {
+    const reason = error instanceof PasskeyCeremonyError ? error.reason : 'failed';
+    return { ok: false, error: reason === 'cancelled' ? 'auth.mfa.passkeyCancelled' : reason === 'unsupported' ? 'auth.mfa.passkeyUnsupported' : 'auth.mfa.passkeyFailed' };
+  }
+  const verified = await postJson<T>(verifyPath, { response });
+  return verified.ok ? { ok: true, body: verified.body } : { ok: false, error: verified.body.code === 'MFA_CHALLENGE_INVALID' ? 'auth.mfa.expired' : 'auth.mfa.passkeyFailed' };
+}
+
 /** Global step-up prompt opened by the API client on 403 STEP_UP_REQUIRED. */
 export function StepUpDialog() {
   const { t } = useTranslation();
-  const { open, method, finish } = useStepUpStore();
+  const { open, method, methods, finish } = useStepUpStore();
   const setCsrf = useAuthStore((s) => s.setCsrf);
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (open) { setValue(''); setError(null); } }, [open]);
   if (!open) return null;
+  const canPasskey = methods.includes('passkey');
+  const formMethod: 'totp' | 'password' | null = methods.includes('totp') ? 'totp' : methods.includes('password') ? 'password' : null;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { csrfToken } = useAuthStore.getState();
-    const res = await fetch('/api/v1/auth/step-up/verify', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
-      body: JSON.stringify(method === 'totp' ? { code: value } : { password: value }),
-    });
+    const res = await postJson<{ csrfToken: string }>('/auth/step-up/verify', formMethod === 'totp' ? { code: value } : { password: value });
     setBusy(false);
     if (!res.ok) {
       setError(t('auth.stepUp.invalid'));
       return;
     }
-    const body = (await res.json()) as { csrfToken: string };
-    setCsrf(body.csrfToken);
+    setCsrf(res.body.csrfToken);
+    finish(true);
+  }
+
+  async function withPasskey() {
+    setBusy(true);
+    setError(null);
+    const result = await passkeyCeremony<{ csrfToken: string }>('/auth/step-up/passkey/options', '/auth/step-up/passkey/verify');
+    setBusy(false);
+    if (!result.ok) {
+      setError(t(result.error === 'auth.mfa.passkeyFailed' ? 'auth.stepUp.invalid' : result.error));
+      return;
+    }
+    if (result.body.csrfToken) setCsrf(result.body.csrfToken);
     finish(true);
   }
 
   return (
     <Dialog open title={t('auth.stepUp.title')} onClose={() => finish(false)}>
-      <form onSubmit={submit}>
-        <p className="mb-3 flex items-center gap-2 text-sm text-muted-foreground"><ShieldCheck size={16} aria-hidden />{t(method === 'totp' ? 'auth.stepUp.totp' : 'auth.stepUp.password')}</p>
-        <FormError message={error} />
-        {method === 'totp'
-          ? <OtpInput value={value} onChange={setValue} label={t('auth.mfa.codeLabel')} />
-          : <PasswordInput label={t('auth.password')} value={value} onChange={setValue} autoFocus />}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={() => finish(false)}>{t('auth.cancel')}</Button>
-          <Button type="submit" disabled={busy || (method === 'totp' && value.length !== 6)}>{t('auth.verify')}</Button>
+      <FormError message={error} />
+      {canPasskey && (
+        <div className="mb-4">
+          <p className="mb-3 flex items-center gap-2 text-sm text-muted-foreground"><KeyRound size={16} aria-hidden />{t('auth.stepUp.passkey')}</p>
+          <Button type="button" className="w-full" onClick={() => void withPasskey()} disabled={busy} autoFocus={method === 'passkey'}>{t('auth.stepUp.getPasskeyAssertion')}</Button>
         </div>
-      </form>
+      )}
+      {formMethod && (
+        <form onSubmit={submit}>
+          {canPasskey && <p className="mb-2 text-center text-xs text-muted-foreground">{t('auth.mfa.orCode')}</p>}
+          <p className="mb-3 flex items-center gap-2 text-sm text-muted-foreground"><ShieldCheck size={16} aria-hidden />{t(formMethod === 'totp' ? 'auth.stepUp.totp' : 'auth.stepUp.password')}</p>
+          {formMethod === 'totp'
+            ? <OtpInput value={value} onChange={setValue} label={t('auth.mfa.codeLabel')} autoFocus={!canPasskey} />
+            : <PasswordInput label={t('auth.password')} value={value} onChange={setValue} autoFocus />}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => finish(false)}>{t('auth.cancel')}</Button>
+            <Button type="submit" disabled={busy || (formMethod === 'totp' && value.length !== 6)}>{t('auth.verify')}</Button>
+          </div>
+        </form>
+      )}
+      {!formMethod && <div className="flex justify-end"><Button type="button" variant="secondary" onClick={() => finish(false)}>{t('auth.cancel')}</Button></div>}
     </Dialog>
   );
 }

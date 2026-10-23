@@ -43,7 +43,7 @@ export function Layout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { me, companyId, setCompany, logout, loadMe } = useAuthStore();
-  const needsCompany = !!me?.isSystemAdmin && me.memberships.length === 0 && !['/group','/group/compare','/admin','/admin/security','/security'].includes(location.pathname);
+  const needsCompany = !!me?.isSystemAdmin && me.memberships.length === 0 && !['/group','/group/compare','/admin','/admin/security','/admin/security/mfa','/security'].includes(location.pathname);
   const { theme, setTheme, sidebarCollapsed, toggleSidebar } = useUiStore();
   useEffect(() => { void loadMe(); }, [loadMe]);
   useEffect(() => { void queryClient.invalidateQueries(); }, [companyId, queryClient]);

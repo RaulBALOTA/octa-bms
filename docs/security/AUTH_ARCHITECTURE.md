@@ -80,6 +80,37 @@ not mutate state (logout is POST-only).
 * Seeds are re-encrypted with the current key on the next successful verification after a
   key rotation.
 
+## 4a. Passkeys (WebAuthn) for administrators
+
+* Eligible: system administrators and holders of `identity.security.update`. Library:
+  `@simplewebauthn/server` 14 / `@simplewebauthn/browser` 14.
+* Registration (`/auth/passkeys/register/*`) requires a session with a recent verification
+  (current factor, or password for a first factor); attestation `none`, resident key
+  preferred, **user verification required**, ES256/RS256, at most 10 per user. A first factor
+  also issues the recovery-code batch.
+* Sign-in: after the password the MFA screen offers the passkey (`/auth/mfa/passkey/*`,
+  `@AllowPreAuth`); step-up: `/auth/step-up/passkey/*`.
+* Each ceremony has a single-use challenge in `webauthn_challenges`, bound to the session or
+  pre-auth challenge that requested it (5 min), consumed atomically *before* verification.
+  The server checks origin (allow-list filtered to the RP ID) and RP ID
+  (`WEBAUTHN_RP_ID`, default = host of `APP_PUBLIC_ORIGIN`; IPs refused), user verification,
+  and the signature counter. Only public keys are stored.
+* Policy `requirePasskeyForAdmins`: a system administrator who has a passkey can no longer
+  use TOTP (sign-in or step-up → `PASSKEY_REQUIRED`); recovery codes remain the lost-device
+  path. It can only be switched on when every active system administrator (≥ 2) has a
+  passkey; an admin's last passkey cannot be removed while it is on. MFA reset (admin
+  recovery, break-glass) revokes passkeys as well.
+* nginx sends `Permissions-Policy: publickey-credentials-create=(self), publickey-credentials-get=(self)`.
+
+## 4b. MFA configuration page
+
+`/admin/security/mfa` (read: `identity.security.read`; edit: system administrators, step-up
+required): rollout readiness checklist (admins with a factor, admins with a passkey,
+enrollment ratio, email delivery, production key), enforcement mode + deadline, methods
+(TOTP profile read-only, passkeys on/off, require passkeys for administrators), session idle /
+absolute lifetime and the step-up window (1–60 min), plus fixed server settings from
+`GET /admin/security/config`. All guard rails are enforced by the API, not the page.
+
 ## 5. Key management and hashing
 
 | Secret | Storage |
@@ -116,7 +147,7 @@ Global guard order: `ThrottlerGuard` → `SessionAuthGuard` → `CsrfGuard` →
   `companyId`. `AuthorizationService` blocks: granting roles with permissions the actor
   lacks, global roles, `SYSTEM_ADMIN`, roles in another company, self-grants, and acting on
   super-admins unless the actor is one.
-* Step-up (recent factor, or password if no factor; 10 min) on: password change, MFA
+* Step-up (recent factor — passkey or TOTP — or password if no factor; window from policy, default 10 min) on: password change, MFA
   disable/replace, first enrollment from a session, recovery-code rotation, role
   create/assign/revoke, user creation, invitations, pilot flag, session revocation by admin,
   recovery requests, policy changes, bank-account creation. Full list:
@@ -132,6 +163,8 @@ Global guard order: `ThrottlerGuard` → `SessionAuthGuard` → `CsrfGuard` →
 | `OPTIONAL` | password only; may enroll | challenged |
 | `ENROLLMENT_REQUIRED` | full access until `enrollmentDeadline`, then enrollment-only | challenged |
 | `ENFORCED` | enrollment-only | challenged |
+
+A "factor" is an active TOTP authenticator **or** passkey.
 
 `users.mfaRequired` puts individual users (pilot cohort, recovered accounts) into
 enforced behaviour regardless of mode. Switching to `ENFORCED` is refused unless the acting
@@ -163,9 +196,10 @@ action, outcome, actor, target, company, correlation id (pino request id), IP pr
 Request logs redact cookies, CSRF headers, `Set-Cookie`, secret-named fields and strip
 query strings.
 
-## 11. Extensibility (not in this rollout)
+## 11. Phishing resistance
 
-`mfa_authenticators.type` is an enum (`TOTP`) and the challenge flow is factor-agnostic;
-WebAuthn/passkeys would add a type and a verify endpoint. Entra OIDC is already a primary
-factor that feeds the same MFA decision. **TOTP is not phishing-resistant** — a real-time
-relay can capture a code; passkeys are the recommended follow-up for administrators.
+**TOTP is not phishing-resistant** — a real-time relay can capture a code. Passkeys are bound
+to the RP ID and verified origin, so a look-alike domain cannot obtain a usable assertion.
+With `requirePasskeyForAdmins` on, administrator accounts no longer accept TOTP. Recovery
+codes remain phishable and are the documented exception (single use, notification on use).
+Entra OIDC is a primary factor that feeds the same MFA decision.

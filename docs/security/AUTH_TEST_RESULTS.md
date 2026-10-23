@@ -9,13 +9,13 @@ that was not run.
 | Suite | Command | Result |
 |---|---|---|
 | Typecheck (api, web, shared) | `pnpm typecheck` | exit 0 |
-| API unit (185 existing + 35 new) | `pnpm test` | **220 / 220** pass, 16 files |
+| API unit (185 existing + 36 new) | `pnpm test` | **221 / 221** pass, 16 files |
 | Web unit | `pnpm test` | **23 / 23** pass, 4 files |
-| Auth integration vs PostgreSQL | `DATABASE_URL=… pnpm --filter @octa-bms/api test:auth` | **51 / 51** pass, 3 files |
-| Playwright, mocked API (7 existing files + `auth.e2e.ts`) | `pnpm --filter @octa-bms/web test:e2e` | **71 / 71** pass |
-| Playwright, live API + DB (`auth-live.e2e.ts`, opt-in) | `OCTA_LIVE_EMAIL=… OCTA_LIVE_PASSWORD=… … test:e2e` | **4 / 4** pass |
+| Auth integration vs PostgreSQL (incl. 15 passkey tests with a software FIDO2 authenticator) | `DATABASE_URL=… pnpm --filter @octa-bms/api test:auth` | **66 / 66** pass, 4 files |
+| Playwright, mocked API (7 existing files + `auth.e2e.ts`, incl. MFA configuration page) | `pnpm --filter @octa-bms/web test:e2e` | **73 / 73** pass |
+| Playwright, live API + DB (`auth-live.e2e.ts`, opt-in; incl. passkey via Chromium's CDP virtual authenticator) | `OCTA_LIVE_EMAIL=… OCTA_LIVE_PASSWORD=… … test:e2e` (API with `APP_PUBLIC_ORIGIN=http://localhost:5181`) | **5 / 5** pass |
 | Production build | `pnpm build` | exit 0 |
-| Migration rehearsal on a restored legacy dump | `psql -f prisma/sql/add_secure_auth.sql` ×2 + `prisma migrate diff --from-url` | applied twice, **no schema drift**, user rows unchanged |
+| Migration rehearsal on a restored legacy dump | `add_secure_auth.sql` + `add_passkeys.sql`, each ×2, then `prisma migrate diff --from-url --exit-code` | **no schema drift** (exit 0), 7 legacy users unchanged |
 | Dependency audit | `pnpm audit --prod` | 28 advisories (2 low, 16 moderate, 10 high), **all pre-existing**; the critical `proxy-addr` advisory was fixed with an in-range override to 2.0.8 |
 
 Baseline before any change: typecheck clean, API 185/185, web 23/23.
@@ -31,6 +31,8 @@ Authenticator does; a physical phone was **not** available in this environment.
 | Live browser test | API responses were cacheable (ETag/304). After sign-in, a reload served the cached `ANONYMOUS` `/auth/state` and sent the user back to `/login`. | `Cache-Control: no-store` on every API response, plus a regression assertion |
 | Live browser test | On a fresh database the super-admin has no company, and the layout hid every page except `/group` and `/admin`, which blocked MFA setup. | `/security` and `/admin/security` added to the allow-list |
 | Log redaction unit test | Secret keys at the top level of explicit log calls (`password`, `code`) were not redacted. | Top-level and nested redaction paths |
+| Passkey suite | Recovery-code rotation/status only recognised TOTP, so passkey-only admins got `MFA_NOT_ENROLLED`. | Factor checks count passkeys |
+| Passkey suite | Deleting a passkey evaluated the actor's last-factor rule before ownership (409 instead of 403 for a foreign id). | Ownership checked first |
 | Self-review | A hijacked session of a user without MFA could enroll the attacker's authenticator. | First enrollment from a session requires a password step-up within 10 min (regression test added) |
 | Self-review | The invitation preview token sat in the URL query string and would reach access logs. | Changed to POST; request logs drop query strings |
 | Pre-existing (F-03) | Anyone with `identity.roles.update` could grant themselves `SYSTEM_ADMIN`. | `AuthorizationService` grant rules + tests |
@@ -65,6 +67,20 @@ Authenticator does; a physical phone was **not** available in this environment.
 | 24 | Sanitization of password, seed, OTP, QR, cookie and codes | verified | unit + `auth-flows` #24 |
 | 25 | Atomic rate limiting on a shared store | verified | 60 hits across 2 connection pools → exactly 25 allowed |
 
+## Passkeys and MFA configuration (added)
+
+Verified by `test/auth/passkeys.int.spec.ts` (15) and the live browser test:
+registration limited to administrators; first passkey issues recovery codes once; attestation
+without user verification, foreign origin (`0cta-bms.example`) or foreign RP ID rejected;
+replayed assertion rejected; another user's genuine passkey rejected; ceremonies impossible
+without the password step; passkey step-up; "require passkeys for administrators" refused
+until every admin (≥ 2) has one, then TOTP refused for admins at sign-in and step-up
+(`PASSKEY_REQUIRED`) while recovery codes and staff TOTP keep working; last admin passkey not
+removable; admin-assisted recovery revokes passkeys; config endpoint exposes no key material.
+Live: Chromium virtual authenticator registers a passkey on `/security`, signs in with it,
+and the configuration page shows the server's guard-rail rejection.
+A physical security key / platform authenticator was **not** available here.
+
 ## Known gaps and follow-ups
 
 * **Blocking before enforcement:** the rollout gates in the runbook §2 (two enrolled admins, recovery drill, pilot) and the deployment prerequisites (TLS + HSTS at the edge, NTP, a real `AUTH_ENCRYPTION_KEY` in a secret manager, SMTP) cannot be verified from this repository.
@@ -73,4 +89,5 @@ Authenticator does; a physical phone was **not** available in this environment.
 * CSP allows `'unsafe-inline'` for **styles only**, because the print templates and org chart inject `<style>`. Scripts stay strictly `'self'`.
 * Login throttling checks the budget before counting the attempt, so a parallel burst can slightly exceed it (still bounded by the per-IP limit).
 * Pre-existing dependency advisories (multer, lodash, js-yaml, react-router, qs, …) need framework upgrades.
-* TOTP is not phishing-resistant. Passkeys/WebAuthn for administrators are the recommended next step.
+* TOTP stays phishable for staff; administrators become phishing-resistant once "require passkeys" is on (recovery codes remain the phishable exception). Passkeys for all staff would be the next step.
+* Changing the domain / RP ID invalidates every passkey (runbook §3a).

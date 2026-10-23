@@ -50,6 +50,7 @@ import { AcceptInvitePage, ForgotPasswordPage, LoginPage, MfaPage, RecoveryPage,
 import { StepUpDialog } from './pages/auth/components';
 import { SecurityPage } from './pages/SecurityPage';
 import { AdminSecurityPage } from './pages/AdminSecurityPage';
+import { MfaConfigPage } from './pages/MfaConfigPage';
 import { PartnersPage } from './pages/PartnersPage';
 import { PipelinePage } from './pages/PipelinePage';
 import { WinLossPage } from './pages/WinLossPage';
@@ -131,6 +132,7 @@ const router = createBrowserRouter([
           { path: '/bi', element: <BiPage /> },
           { path: '/admin', element: <AdminPage /> },
           { path: '/admin/security', element: <AdminSecurityPage /> },
+          { path: '/admin/security/mfa', element: <MfaConfigPage /> },
           { path: '/security', element: <SecurityPage /> },
           { path: '/admin/data', element: <DataManagementPage /> },
           { path: '/contracts', element: <ContractsPage /> },

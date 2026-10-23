@@ -12,6 +12,8 @@ const EMAIL = process.env.OCTA_LIVE_EMAIL;
 const PASSWORD = process.env.OCTA_LIVE_PASSWORD;
 test.skip(!EMAIL || !PASSWORD, 'set OCTA_LIVE_EMAIL / OCTA_LIVE_PASSWORD to run against a live API');
 test.describe.configure({ mode: 'serial' });
+// WebAuthn needs a domain RP ID (not an IP): the live API must run with APP_PUBLIC_ORIGIN=http://localhost:5181
+test.use({ baseURL: process.env.OCTA_LIVE_BASE_URL ?? 'http://localhost:5181' });
 
 function base32(input: string): Buffer {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -101,4 +103,45 @@ test('recovery code signs in once', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Recovery code' }).fill(recoveryCodes[0]);
   await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page.getByRole('alert').first()).toContainText('not valid or was already used');
+});
+
+test('administrator registers a passkey, signs in with it, and the MFA configuration page enforces guard rails', async ({ page, context }) => {
+  // Chromium's built-in virtual FIDO2 authenticator (user verification succeeds)
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  });
+
+  // second factor via a recovery code (TOTP time steps were consumed by earlier tests)
+  await signIn(page);
+  await page.getByRole('link', { name: 'Use a recovery code instead' }).click();
+  await page.getByRole('textbox', { name: 'Recovery code' }).fill(recoveryCodes[1]);
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL('/');
+
+  await page.goto('/security');
+  await expect(page.getByRole('heading', { name: 'Passkeys' })).toBeVisible();
+  await page.getByLabel('Name').fill('Virtual security key');
+  await page.getByRole('button', { name: 'Add a passkey' }).click();
+  await expect(page.getByText('Passkey added')).toBeVisible();
+  await expect(page.getByText('Virtual security key')).toBeVisible();
+  // the private key exists only inside the authenticator
+  expect((await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials).toHaveLength(1);
+
+  // sign in again: password, then the passkey instead of a code
+  await context.clearCookies();
+  await signIn(page);
+  await expect(page).toHaveURL(/\/auth\/mfa/);
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await expect(page).toHaveURL('/');
+  expect((await page.request.get('/api/v1/auth/me')).status()).toBe(200);
+
+  // configuration page: readiness reflects the passkey; requiring passkeys needs ≥2 admins
+  await page.goto('/admin/security/mfa');
+  await expect(page.getByText('System administrators with a passkey: 1 of 1')).toBeVisible();
+  await page.getByRole('switch', { name: 'Require passkeys for system administrators' }).check();
+  await page.getByRole('button', { name: 'Save configuration' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'at least two' })).toBeVisible();
 });

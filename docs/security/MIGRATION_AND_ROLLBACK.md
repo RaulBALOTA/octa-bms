@@ -11,10 +11,16 @@ Data changes it makes (all on new columns, plus one flag):
 
 It aborts without changes if two `users.email` values differ only by case.
 
+`apps/api/prisma/sql/add_passkeys.sql` (passkeys + MFA configuration) is a second additive,
+idempotent script applied **after** the first: 1 enum type, 2 tables
+(`webauthn_credentials`, `webauthn_challenges`) and 3 defaulted columns on
+`security_policies` (`passkeysEnabled`, `requirePasskeyForAdmins`, `stepUpMaxAgeMinutes`).
+`auth:setup --apply` runs both in order.
+
 ## Rehearsed (evidence in AUTH_TEST_RESULTS.md)
 
 * Restored a `pg_dump` of a database created from the **pre-change** schema with 7 legacy
-  users (bootstrap admin + demo seed) → applied twice → `prisma migrate diff
+  users (bootstrap admin + demo seed) → applied both scripts twice → `prisma migrate diff
   --from-url … --to-schema-datamodel prisma/schema.prisma` reports **no difference**; user
   rows byte-identical in all legacy columns (md5 fingerprint).
 * Automated in `test/auth/platform.int.spec.ts` (#22): legacy schema reconstructed from the
@@ -30,7 +36,7 @@ It aborts without changes if two `users.email` values differ only by case.
    (`pnpm --filter @octa-bms/api auth:admin generate-key`), `AUTH_ENCRYPTION_KEY_ID=key-v1`,
    `APP_PUBLIC_ORIGIN=https://…`, `TRUST_PROXY` (e.g. `1` behind one nginx),
    SMTP settings. Keep `MFA_REQUIRED_MODE=optional`.
-3. **Apply schema:** `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/prisma/sql/add_secure_auth.sql`
+3. **Apply schema:** `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/prisma/sql/add_secure_auth.sql -f apps/api/prisma/sql/add_passkeys.sql`
    (on a local DB: `pnpm --filter @octa-bms/api auth:setup --apply` takes the dump for you).
 4. **Seed permissions:** `pnpm db:seed` (idempotent; adds `identity.security.*`, preserves
    admins and data).
@@ -55,6 +61,8 @@ It aborts without changes if two `users.email` values differ only by case.
 
   ```sql
   BEGIN;
+  DROP TABLE IF EXISTS webauthn_challenges, webauthn_credentials;
+  DROP TYPE IF EXISTS "WebAuthnChallengePurpose";
   DROP TABLE IF EXISTS auth_rate_limits, security_policies, security_events, invitations,
     one_time_tokens, mfa_recovery_requests, recovery_codes, mfa_challenges, mfa_enrollments,
     mfa_authenticators, auth_sessions;

@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Laptop, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Fingerprint, KeyRound, Laptop, ShieldAlert, ShieldCheck } from 'lucide-react';
+import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
+import { createPasskey, PasskeyCeremonyError, passkeysSupported } from '../lib/passkeys';
 import { FormEvent, ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -16,6 +18,83 @@ function Card({ title, icon, children }: { title: string; icon: ReactNode; child
     <section className="rounded-xl border border-border bg-card p-5" aria-labelledby={`card-${title}`}>
       <h2 id={`card-${title}`} className="mb-3 flex items-center gap-2 text-sm font-semibold">{icon}{title}</h2>
       {children}
+    </section>
+  );
+}
+
+interface PasskeyRow { id: string; name: string; deviceType: string; backedUp: boolean; createdAt: string; lastUsedAt: string | null }
+
+/** Administrators: register, rename and remove passkeys (WebAuthn). */
+function PasskeysCard({ required, onChange, fmt }: { required: boolean; onChange: () => void; fmt: (v?: string | null) => string }) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const list = useQuery({ queryKey: ['passkeys'], queryFn: () => api.get<{ eligible: boolean; passkeys: PasskeyRow[] }>('/auth/passkeys') });
+  const reload = () => { void queryClient.invalidateQueries({ queryKey: ['passkeys'] }); onChange(); };
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/auth/passkeys/${id}`),
+    onSuccess: () => { toast(t('auth.passkeys.removed')); reload(); },
+    onError: (e: ApiError) => toast(e.message, 'error'),
+  });
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const options = await api.post<PublicKeyCredentialCreationOptionsJSON>('/auth/passkeys/register/options');
+      const response = await createPasskey(options);
+      const result = await api.post<{ csrfToken: string; recoveryCodes?: string[] }>('/auth/passkeys/register/verify', { name: name || 'Passkey', response });
+      useAuthStore.getState().setCsrf(result.csrfToken);
+      setName('');
+      toast(t('auth.passkeys.added'));
+      if (result.recoveryCodes) setCodes(result.recoveryCodes);
+      reload();
+    } catch (error) {
+      if (!(error instanceof PasskeyCeremonyError && error.reason === 'cancelled')) {
+        toast(error instanceof PasskeyCeremonyError && error.reason === 'unsupported' ? t('auth.passkeys.unsupported') : error instanceof Error ? error.message : t('auth.mfa.passkeyFailed'), 'error');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const rows = list.data?.passkeys ?? [];
+  return (
+    <section className="rounded-xl border border-border bg-card p-5 md:col-span-2" aria-labelledby="card-passkeys">
+      <h2 id="card-passkeys" className="mb-1 flex items-center gap-2 text-sm font-semibold"><Fingerprint size={16} aria-hidden />{t('auth.passkeys.title')}</h2>
+      <p className="mb-3 text-xs text-muted-foreground">{t('auth.passkeys.intro')}</p>
+      {required && <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-400">{t('auth.passkeys.required')}</p>}
+      {!rows.length ? <p className="mb-3 text-sm text-muted-foreground">{t('auth.passkeys.none')}</p> : (
+        <ul className="mb-3 divide-y divide-border text-sm">
+          {rows.map((p) => (
+            <li key={p.id} className="flex items-center justify-between gap-2 py-2">
+              <div>
+                <p className="font-medium">{p.name} <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs">{p.backedUp ? t('auth.passkeys.synced') : t('auth.passkeys.deviceBound')}</span></p>
+                <p className="text-xs text-muted-foreground">{t('auth.passkeys.created', { date: fmt(p.createdAt) })} · {t('auth.passkeys.lastUsed', { date: p.lastUsedAt ? fmt(p.lastUsedAt) : t('auth.passkeys.never') })}</p>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => remove.mutate(p.id)} disabled={remove.isPending}>{t('auth.passkeys.remove')}</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {passkeysSupported() ? (
+        <form onSubmit={add} className="flex flex-wrap items-end gap-2">
+          <label className="min-w-[14rem] flex-1 text-xs font-medium text-muted-foreground">
+            {t('auth.passkeys.name')}
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder={t('auth.passkeys.namePlaceholder')}
+              className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+          </label>
+          <Button type="submit" disabled={busy}><Fingerprint size={14} aria-hidden />{t('auth.passkeys.add')}</Button>
+        </form>
+      ) : <p className="text-sm text-muted-foreground">{t('auth.passkeys.unsupported')}</p>}
+      {codes && (
+        <Dialog open title={t('auth.codes.title')} onClose={() => undefined}>
+          <RecoveryCodesPanel codes={codes} onDone={() => setCodes(null)} />
+        </Dialog>
+      )}
     </section>
   );
 }
@@ -63,7 +142,7 @@ export function SecurityPage() {
       <h1 className="text-xl font-bold">{t('auth.security.title')}</h1>
       <div className="grid gap-4 md:grid-cols-2">
         <Card title={t('auth.security.mfaTitle')} icon={mfa?.enrolled ? <ShieldCheck size={16} className="text-green-600" aria-hidden /> : <ShieldAlert size={16} className="text-amber-600" aria-hidden />}>
-          <p className="text-sm font-medium">{mfa?.enrolled ? t('auth.security.enabled') : t('auth.security.disabled')}</p>
+          <p className="text-sm font-medium">{mfa?.totp ? t('auth.security.enabled') : mfa?.enrolled ? t('auth.passkeys.title') : t('auth.security.disabled')}</p>
           {mfa?.required && <p className="text-xs text-muted-foreground">{mfa.enrollmentDue ? t('auth.security.dueBy', { date: fmt(mfa.enrollmentDue) }) : t('auth.security.requiredBy')}</p>}
           {mfa?.enrolled && (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -74,7 +153,7 @@ export function SecurityPage() {
             <Link to="/auth/setup-mfa?next=/security" className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90">
               {mfa?.enrolled ? t('auth.security.replace') : t('auth.security.enable')}
             </Link>
-            {mfa?.enrolled && !mfa.required && <Button variant="secondary" onClick={() => setDisableOpen(true)}>{t('auth.security.turnOff')}</Button>}
+            {mfa?.totp && !mfa.required && <Button variant="secondary" onClick={() => setDisableOpen(true)}>{t('auth.security.turnOff')}</Button>}
           </div>
           {mfa?.enrolled && <p className="mt-2 text-xs text-muted-foreground">{t('auth.setup.replaceWarning')}</p>}
         </Card>
@@ -88,6 +167,8 @@ export function SecurityPage() {
             </>
           ) : <p className="text-sm text-muted-foreground">—</p>}
         </Card>
+
+        {mfa?.passkeyEligible && <PasskeysCard required={!!mfa.passkeyRequired} onChange={refresh} fmt={fmt} />}
 
         <Card title={t('auth.security.passwordTitle')} icon={<KeyRound size={16} aria-hidden />}>
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>

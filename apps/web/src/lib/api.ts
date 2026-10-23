@@ -1,5 +1,5 @@
 import { useAuthStore } from '../stores/auth';
-import { requestStepUp } from '../stores/step-up';
+import { requestStepUp, type StepUpMethod } from '../stores/step-up';
 
 const BASE = '/api/v1';
 const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -33,11 +33,11 @@ function headersFor(method: string, extra: Record<string, string> = {}, json = t
  *  403 CSRF_REJECTED → refresh the CSRF token once, then exactly one retry.
  */
 async function handleFailure(res: Response, attempt: number): Promise<'retry' | ApiError> {
-  const body = await res.json().catch(() => undefined) as { code?: string; message?: string; method?: 'totp' | 'password' } | undefined;
+  const body = await res.json().catch(() => undefined) as { code?: string; message?: string; method?: StepUpMethod; methods?: StepUpMethod[] } | undefined;
   if (res.status === 401) {
     useAuthStore.getState().markSignedOut(body?.code);
   } else if (res.status === 403 && attempt === 0) {
-    if (body?.code === 'STEP_UP_REQUIRED' && (await requestStepUp(body.method ?? 'totp'))) return 'retry';
+    if (body?.code === 'STEP_UP_REQUIRED' && (await requestStepUp(body.method ?? 'totp', body.methods))) return 'retry';
     if (body?.code === 'CSRF_REJECTED') {
       await useAuthStore.getState().refreshState();
       return 'retry';

@@ -1,15 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldCheck } from 'lucide-react';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button, Dialog, Field, SelectInput, Tabs, TextArea, TextInput, useToast } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useAuthStore } from '../stores/auth';
 
 type Mode = 'DISABLED' | 'OPTIONAL' | 'ENROLLMENT_REQUIRED' | 'ENFORCED';
-interface Policy { mfaMode: Mode; enrollmentDeadline: string | null; sessionIdleMinutes: number; sessionAbsoluteHours: number; source: string }
+interface Policy { mfaMode: Mode; enrollmentDeadline: string | null; passkeysEnabled: boolean; requirePasskeyForAdmins: boolean }
 interface Overview { users: number; enrolled: number; notEnrolled: number; pendingEnrollments: number; activeSessions: number; pendingRecovery: number; enrolledAdmins: number; policy: Policy }
-interface UserRow { id: string; email: string; displayName: string | null; isActive: boolean; isSystemAdmin: boolean; lastLoginAt: string | null; mfaRequired: boolean; mfaEnrolled: boolean; recoveryCodesRemaining: number; activeSessions: number }
+interface UserRow { id: string; email: string; displayName: string | null; isActive: boolean; isSystemAdmin: boolean; lastLoginAt: string | null; mfaRequired: boolean; mfaEnrolled: boolean; totpEnrolled: boolean; passkeys: number; recoveryCodesRemaining: number; activeSessions: number }
 interface RecoveryRow { id: string; status: string; reason: string; verificationMethod: string; requestedById: string; approvedById: string | null; createdAt: string; expiresAt: string; targetUser: { email: string; isSystemAdmin: boolean } }
 interface InvitationRow { id: string; email: string; expiresAt: string; redeemedAt: string | null; revokedAt: string | null; company: { name: string } }
 interface EventRow { id: string; action: string; outcome: string; actorUserId: string | null; targetUserId: string | null; ipPrefix: string | null; createdAt: string }
@@ -33,19 +34,6 @@ export function AdminSecurityPage() {
   const invitations = useQuery({ queryKey: ['sec-invitations', companyId], queryFn: () => api.get<InvitationRow[]>('/admin/security/invitations'), enabled: tab === 'invitations' });
   const events = useQuery({ queryKey: ['sec-events', companyId], queryFn: () => api.get<EventRow[]>('/admin/security/events?take=200'), enabled: tab === 'events' });
   const roles = useQuery({ queryKey: ['sec-roles'], queryFn: () => api.get<Role[]>('/identity/roles'), enabled: tab === 'invitations' });
-
-  const [policy, setPolicy] = useState<Policy | null>(null);
-  useEffect(() => { if (overview.data && !policy) setPolicy(overview.data.policy); }, [overview.data, policy]);
-  const savePolicy = useMutation({
-    mutationFn: () => api.patch<Policy>('/admin/security/policy', {
-      mfaMode: policy!.mfaMode,
-      enrollmentDeadline: policy!.enrollmentDeadline ? new Date(policy!.enrollmentDeadline).toISOString() : null,
-      sessionIdleMinutes: Number(policy!.sessionIdleMinutes),
-      sessionAbsoluteHours: Number(policy!.sessionAbsoluteHours),
-    }),
-    onSuccess: (p) => { setPolicy(p); toast(t('auth.admin.policySaved')); invalidate(); },
-    onError,
-  });
 
   const setPilot = useMutation({ mutationFn: (u: UserRow) => api.patch(`/admin/security/users/${u.id}/mfa-required`, { required: !u.mfaRequired }), onSuccess: invalidate, onError });
   const revokeSessions = useMutation({ mutationFn: (id: string) => api.post(`/admin/security/users/${id}/revoke-sessions`), onSuccess: invalidate, onError });
@@ -85,27 +73,17 @@ export function AdminSecurityPage() {
         ))}
       </dl>
 
-      {policy && (
-        <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="policy-title">
-          <h2 id="policy-title" className="mb-1 text-sm font-semibold">{t('auth.admin.policy')}</h2>
-          <p className="mb-3 text-xs text-muted-foreground">{t('auth.admin.policyHelp')}</p>
-          <form className="grid gap-3 sm:grid-cols-5" onSubmit={(e: FormEvent) => { e.preventDefault(); savePolicy.mutate(); }}>
-            <Field label={t('auth.admin.mode')}>
-              <SelectInput value={policy.mfaMode} disabled={!me?.isSystemAdmin} onChange={(e) => setPolicy({ ...policy, mfaMode: e.target.value as Mode })}>
-                {(['DISABLED', 'OPTIONAL', 'ENROLLMENT_REQUIRED', 'ENFORCED'] as Mode[]).map((m) => <option key={m} value={m}>{t(`auth.admin.modes.${m}`)}</option>)}
-              </SelectInput>
-            </Field>
-            <Field label={t('auth.admin.deadline')}>
-              <TextInput type="datetime-local" disabled={!me?.isSystemAdmin} value={policy.enrollmentDeadline ? policy.enrollmentDeadline.slice(0, 16) : ''} onChange={(e) => setPolicy({ ...policy, enrollmentDeadline: e.target.value || null })} />
-            </Field>
-            <Field label={t('auth.admin.idle')}>
-              <TextInput type="number" min={5} max={1440} disabled={!me?.isSystemAdmin} value={policy.sessionIdleMinutes} onChange={(e) => setPolicy({ ...policy, sessionIdleMinutes: Number(e.target.value) })} />
-            </Field>
-            <Field label={t('auth.admin.absolute')}>
-              <TextInput type="number" min={1} max={336} disabled={!me?.isSystemAdmin} value={policy.sessionAbsoluteHours} onChange={(e) => setPolicy({ ...policy, sessionAbsoluteHours: Number(e.target.value) })} />
-            </Field>
-            <div className="flex items-end">{me?.isSystemAdmin && <Button type="submit" disabled={savePolicy.isPending}>{t('auth.admin.savePolicy')}</Button>}</div>
-          </form>
+      {o && (
+        <section className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4" aria-labelledby="policy-title">
+          <div className="flex-1">
+            <h2 id="policy-title" className="text-sm font-semibold">{t('auth.admin.policy')}</h2>
+            <p className="text-xs text-muted-foreground">
+              {t('auth.admin.mode')}: <strong>{t(`auth.admin.modes.${o.policy.mfaMode}`)}</strong>
+              {o.policy.enrollmentDeadline && <> · {t('auth.admin.deadline')}: {fmt(o.policy.enrollmentDeadline)}</>}
+              {' · '}{t('auth.mfaConfig.passkeysTitle')}: {o.policy.requirePasskeyForAdmins ? t('auth.mfaConfig.requirePasskeys') : o.policy.passkeysEnabled ? '✓' : '—'}
+            </p>
+          </div>
+          <Link to="/admin/security/mfa" className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90">{t('auth.mfaConfig.link')}</Link>
         </section>
       )}
 
@@ -131,7 +109,7 @@ export function AdminSecurityPage() {
                 <tr key={u.id}>
                   <td className="px-3 py-2"><p className="font-medium">{u.displayName ?? u.email}</p><p className="text-xs text-muted-foreground">{u.email}{u.isSystemAdmin ? ' · admin' : ''}</p></td>
                   <td className="px-3 py-2">{u.isActive ? '●' : '○'}</td>
-                  <td className="px-3 py-2">{u.mfaEnrolled ? t('auth.admin.enrolled') : <span className="text-amber-700 dark:text-amber-400">{t('auth.admin.notEnrolled')}</span>}{u.mfaRequired && <span className="ml-1 text-xs text-muted-foreground">(pilot)</span>}</td>
+                  <td className="px-3 py-2">{u.mfaEnrolled ? <>{t('auth.admin.enrolled')}{u.passkeys > 0 && <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-xs">{t('auth.admin.passkeys')}: {u.passkeys}</span>}</> : <span className="text-amber-700 dark:text-amber-400">{t('auth.admin.notEnrolled')}</span>}{u.mfaRequired && <span className="ml-1 text-xs text-muted-foreground">(pilot)</span>}</td>
                   <td className="px-3 py-2 tabular-nums">{u.mfaEnrolled ? u.recoveryCodesRemaining : '—'}</td>
                   <td className="px-3 py-2 tabular-nums">{u.activeSessions}</td>
                   <td className="px-3 py-2 text-xs">{fmt(u.lastLoginAt)}</td>

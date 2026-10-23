@@ -31,7 +31,14 @@
     "expired": "This sign-in attempt expired. Please sign in again.",
     "useRecovery": "Use a recovery code instead",
     "useAuthenticator": "Use the authenticator app instead",
-    "verifying": "Verifying…"
+    "verifying": "Verifying…",
+    "usePasskey": "Sign in with a passkey",
+    "passkeyPrompt": "Use your passkey (security key, Windows Hello, Touch ID or phone) to finish signing in.",
+    "passkeyRequired": "Your organization requires a passkey for administrator accounts.",
+    "passkeyFailed": "The passkey could not be verified. Try again.",
+    "passkeyCancelled": "Passkey prompt was closed.",
+    "passkeyUnsupported": "This browser does not support passkeys.",
+    "orCode": "or enter a code"
   },
   "recovery": {
     "title": "Use a recovery code",
@@ -96,7 +103,9 @@
     "title": "Confirm it’s you",
     "totp": "Enter the current code from Microsoft Authenticator to continue.",
     "password": "Enter your password to continue.",
-    "invalid": "Verification failed."
+    "invalid": "Verification failed.",
+    "passkey": "Confirm with your passkey to continue.",
+    "usePasskey": "Use passkey"
   },
   "security": {
     "title": "Security",
@@ -182,6 +191,68 @@
     "action": "Event",
     "outcome": "Outcome",
     "when": "When",
-    "none": "Nothing to show"
+    "none": "Nothing to show",
+    "passkeys": "Passkeys"
+  },
+  "passkeys": {
+    "title": "Passkeys",
+    "intro": "Phishing-resistant sign-in for administrators: a security key, Windows Hello, Touch ID / Face ID or a phone. The private key never leaves your device.",
+    "add": "Add a passkey",
+    "name": "Name",
+    "namePlaceholder": "e.g. YubiKey, MacBook Touch ID",
+    "added": "Passkey added",
+    "removed": "Passkey removed",
+    "remove": "Remove",
+    "rename": "Rename",
+    "synced": "Synced",
+    "deviceBound": "This device only",
+    "created": "Added {{date}}",
+    "lastUsed": "Last used {{date}}",
+    "never": "never",
+    "none": "No passkeys yet.",
+    "required": "Required by your organization — keep at least one.",
+    "unsupported": "This browser does not support passkeys."
+  },
+  "mfaConfig": {
+    "title": "MFA configuration",
+    "link": "Configure MFA",
+    "intro": "Organization-wide settings for two-step verification. Changes take effect on all API instances within 15 seconds and are recorded in the security log.",
+    "readOnly": "Only system administrators can change these settings.",
+    "readiness": "Rollout readiness",
+    "checkAdmins": "At least two system administrators have a second factor ({{count}})",
+    "checkAdminPasskeys": "System administrators with a passkey: {{with}} of {{total}}",
+    "checkEnrollment": "Users enrolled: {{enrolled}} of {{users}}",
+    "checkEmail": "Security email delivery configured",
+    "checkKey": "Production encryption key in use",
+    "modeTitle": "Enforcement",
+    "modeHelp": {
+      "DISABLED": "No enrollment offered. Existing factors are still checked.",
+      "OPTIONAL": "Users may enroll; enrolled users are always challenged.",
+      "ENROLLMENT_REQUIRED": "Everyone must enroll; full access until the deadline, then enrollment only.",
+      "ENFORCED": "Users without a factor can only reach the enrollment screen."
+    },
+    "methodsTitle": "Methods",
+    "totpTitle": "Authenticator app (TOTP)",
+    "totpDetail": "Microsoft Authenticator compatible · {{algorithm}} · {{digits}} digits · {{period}} s · ±{{window}} step · issuer “{{issuer}}”",
+    "alwaysOn": "Always available",
+    "passkeysTitle": "Passkeys for administrators",
+    "passkeysDetail": "WebAuthn / FIDO2 · relying party {{rpId}} · user verification required",
+    "passkeysEnabled": "Allow passkeys",
+    "requirePasskeys": "Require passkeys for system administrators",
+    "requirePasskeysHelp": "Administrators who have a passkey can no longer use authenticator codes. Recovery codes stay available. Requires every system administrator (at least two) to have a passkey.",
+    "recoveryTitle": "Recovery codes",
+    "recoveryDetail": "10 single-use codes per user, shown once; admin-assisted reset needs a second administrator.",
+    "sessionsTitle": "Sessions and re-verification",
+    "stepUp": "Re-verification window (minutes)",
+    "stepUpHelp": "How long a second-factor check stays valid for sensitive actions (role grants, policy, passwords).",
+    "save": "Save configuration",
+    "saved": "MFA configuration saved",
+    "unsaved": "Unsaved changes",
+    "defaultFromEnv": "Default from server configuration: {{value}}",
+    "fixedTitle": "Fixed server settings",
+    "challengeTtl": "Sign-in challenge: {{seconds}} s, {{attempts}} attempts",
+    "passwordPolicy": "Passwords: at least {{min}} characters{{breached}}",
+    "breached": ", breached-password check on",
+    "pilotLink": "Pilot users are selected on the Users tab of the security dashboard."
   }
 }

@@ -42,6 +42,16 @@ phone's clock is set automatically (*Settings → Date & time → automatic*).
   your identity in person or by video call and start a reset that a *second* administrator
   must approve. You will then set up the authenticator again. Email alone can never reset it.
 
+## Passkeys (administrators)
+
+Administrators can add a **passkey** under Security → Passkeys: a hardware security key
+(YubiKey etc.), Windows Hello, Touch ID / Face ID, or a phone. Give it a name, select
+**Add a passkey** and follow your browser's prompt. At sign-in, after your password, choose
+**Sign in with a passkey**. Passkeys cannot be phished by fake login pages. Register at least
+two (e.g. a laptop and a hardware key) — if your organization requires passkeys for
+administrators, authenticator codes stop working for your account and your recovery codes
+are the fallback.
+
 ## Good to know
 
 * Never tell anyone your code or recovery codes — OCTA BMS staff will never ask for them.
