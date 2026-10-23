@@ -58,42 +58,69 @@ read-only scopes can replace the API key without changing the rest of the module
 These permissions only control what users can do *inside OCTA*. None of them
 gives anyone write access at a bank.
 
-## Setup
+## Go live
 
-### Existing database
+All steps run from `apps/api`. The helper `pnpm banking:setup` (`prisma/setup-banking.ts`)
+prints a readiness checklist and changes nothing unless you pass `--apply`.
 
-```bash
-psql "$DATABASE_URL" -f apps/api/prisma/sql/add_bank_connections.sql
-psql "$DATABASE_URL" -f apps/api/prisma/sql/grant_banking_permissions.sql
-```
+1. **Check the current state**
 
-Fresh databases get the tables from `pnpm db:push` and the permissions from
-`pnpm db:seed`.
+   ```bash
+   pnpm banking:setup
+   ```
 
-### Environment (`apps/api/.env`)
+2. **Install the schema and permissions.** This step first writes a `pg_dump`
+   backup to `backups/`. It is safe to re-run: the tables are created once, and
+   the grants are idempotent.
 
-```bash
-BANKING_ENABLED=true
-BANKING_ENCRYPTION_KEY=$(openssl rand -base64 32)   # store it in your secret manager
-```
+   ```bash
+   pnpm banking:setup --apply
+   ```
 
-**Qonto** needs no server config. In the Qonto web app, go to *Settings →
-Integrations & partnerships → API key*, then enter the login and secret key under
-*Bank connections → Connect bank → Qonto*. OCTA checks the key, imports the
-accounts and fetches the last `BANKING_SYNC_LOOKBACK_DAYS` (default 90) days.
+   On a fresh database you can skip this step: `pnpm db:push` and `pnpm db:seed`
+   already cover it.
 
-**Other banks (PSD2):**
+3. **Configure the API**, then restart it.
+   - **Production:** put both variables in your secret store.
 
-1. Register an application at Enable Banking. Set the redirect URL to
-   `{APP_URL}/finance/banking/callback` (for example
-   `https://bms.example.com/finance/banking/callback`).
-2. Set `ENABLE_BANKING_APP_ID` and `ENABLE_BANKING_PRIVATE_KEY`. The key can be a
-   path to the downloaded `.pem` or the PEM text itself.
-3. In OCTA, go to *Connect bank → Other bank (PSD2)*. Pick the country and the bank,
-   then approve the read-only consent at the bank. You return to OCTA, and the
-   first sync runs.
-4. Before the consent ends (shown on the card, with a warning 14 days ahead),
-   click **Renew consent**.
+     ```bash
+     BANKING_ENABLED=true
+     BANKING_ENCRYPTION_KEY=$(openssl rand -base64 32)   # back this up
+     ```
+
+   - **Local:** `pnpm banking:setup --apply --enable-local` writes both into
+     `apps/api/.env` for you. This only works for a `localhost` database.
+
+4. **Connect Qonto.** This needs no server config.
+   1. In the Qonto web app, go to *Settings → Integrations & partnerships → API key*.
+   2. In OCTA, go to *Finance → Bank connections → Connect bank → Qonto*.
+   3. Enter the login and secret key.
+
+   OCTA checks the key, imports the accounts and fetches the last
+   `BANKING_SYNC_LOOKBACK_DAYS` (default 90) days.
+
+5. **Optional: connect other banks (PSD2).**
+   1. Register an application at Enable Banking. Set its redirect URL to
+      `{APP_URL}/finance/banking/callback`; the helper prints the exact URL.
+   2. Set `ENABLE_BANKING_APP_ID` and `ENABLE_BANKING_PRIVATE_KEY`. The key can be
+      a path to the downloaded `.pem` or the PEM text itself.
+   3. Check the credentials with one read-only call:
+
+      ```bash
+      pnpm banking:setup --probe
+      ```
+
+   4. In OCTA, go to *Connect bank → Other bank (PSD2)*. Pick the country and the
+      bank, then approve the read-only consent at the bank.
+   5. Before the consent ends, click **Renew consent**. The card warns you 14 days
+      ahead.
+
+6. **Verify the data.** Run one sync against the providers' sandboxes (see
+   *Verify before go-live* below). Compare a few lines with the bank statement.
+
+You can also apply the SQL by hand instead of using the helper:
+`psql "$DATABASE_URL" -f prisma/sql/add_bank_connections.sql`, then the same
+command with `grant_banking_permissions.sql`.
 
 ## Sync
 

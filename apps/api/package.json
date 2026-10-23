@@ -16,7 +16,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:seed:demo": "tsx prisma/seed.ts --demo",
-    "data:reset:preview": "tsx prisma/clear-business-data.ts"
+    "data:reset:preview": "tsx prisma/clear-business-data.ts",
+    "banking:setup": "tsx --env-file=.env prisma/setup-banking.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
