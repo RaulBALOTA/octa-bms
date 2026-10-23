@@ -17,7 +17,12 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
-import { RequirePermission } from '../../core/auth/decorators';
+import {
+  AuthUser,
+  CurrentUser,
+  RequirePermission,
+} from '../../core/auth/decorators';
+import { requireInCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
 
@@ -35,6 +40,16 @@ class UpdateUserDto {
   @IsOptional() @IsString() locale?: string;
   @IsOptional() @IsString() theme?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+/**
+ * Company administrators see and manage the users of their active company;
+ * only system administrators reach users across all companies.
+ */
+function visibleUsers(caller: AuthUser) {
+  return caller.isSystemAdmin
+    ? {}
+    : { memberships: { some: { companyId: caller.companyId ?? '' } } };
 }
 
 const USER_SELECT = {
@@ -59,9 +74,10 @@ export class UsersController {
 
   @Get()
   @RequirePermission('identity.users.read')
-  async list(@Query() query: PageQueryDto) {
+  async list(@CurrentUser() caller: AuthUser, @Query() query: PageQueryDto) {
     const where = {
       deletedAt: null,
+      ...visibleUsers(caller),
       ...(query.q
         ? {
             OR: [
@@ -87,9 +103,9 @@ export class UsersController {
 
   @Get(':id')
   @RequirePermission('identity.users.read')
-  async get(@Param('id') id: string) {
+  async get(@CurrentUser() caller: AuthUser, @Param('id') id: string) {
     const user = await this.prisma.user.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, ...visibleUsers(caller) },
       select: {
         ...USER_SELECT,
         userRoles: {
@@ -110,10 +126,14 @@ export class UsersController {
 
   @Post()
   @RequirePermission('identity.users.create')
-  async create(@Body() dto: CreateUserDto) {
+  async create(@CurrentUser() caller: AuthUser, @Body() dto: CreateUserDto) {
     const passwordHash = await argon2.hash(dto.password);
     return this.prisma.user.create({
       data: {
+        // join the active company, so the new user is visible to its admins
+        ...(caller.companyId
+          ? { memberships: { create: { companyId: caller.companyId, isDefault: true } } }
+          : {}),
         email: dto.email.toLowerCase(),
         firstName: dto.firstName,
         lastName: dto.lastName,
@@ -127,7 +147,18 @@ export class UsersController {
 
   @Patch(':id')
   @RequirePermission('identity.users.update')
-  async update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+  async update(
+    @CurrentUser() caller: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+  ) {
+    await requireInCompany(
+      this.prisma.user.findFirst({
+        where: { id, deletedAt: null, ...visibleUsers(caller) },
+        select: { id: true },
+      }),
+      'User',
+    );
     return this.prisma.user.update({
       where: { id },
       data: dto,

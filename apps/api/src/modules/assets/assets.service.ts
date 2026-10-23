@@ -4,6 +4,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { AssetStatus, Prisma } from '@prisma/client';
+import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { paged } from '../../common/pagination';
 import { NumberSequenceService } from '../master-data/number-sequence.service';
@@ -101,6 +102,7 @@ export class AssetsService {
 
   async assign(companyId: string, id: string, employeeId: string) {
     const asset = await this.get(companyId, id);
+    await assertReferenceInCompany(employeeId, 'employeeId', inCompany(this.prisma, 'employee', companyId));
     if (asset.status === 'ASSIGNED') {
       throw new UnprocessableEntityException({
         code: 'ASSET_ALREADY_ASSIGNED',

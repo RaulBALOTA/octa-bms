@@ -27,6 +27,7 @@ import {
   CurrentUser,
   RequirePermission,
 } from '../../core/auth/decorators';
+import { requireInCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NumberSequenceService } from '../master-data/number-sequence.service';
 
@@ -254,10 +255,13 @@ export class ProposalsController {
   @Delete('proposals/lines/:lineId')
   @RequirePermission('sales.proposals.update')
   @HttpCode(200)
-  async removeLine(@Param('lineId') lineId: string) {
-    const line = await this.prisma.feeCalculationLine.findUniqueOrThrow({
-      where: { id: lineId },
-    });
+  async removeLine(@CompanyId() companyId: string, @Param('lineId') lineId: string) {
+    const line = await requireInCompany(
+      this.prisma.feeCalculationLine.findFirst({
+        where: { id: lineId, proposal: { companyId } },
+      }),
+      'Fee line',
+    );
     await this.prisma.feeCalculationLine.delete({ where: { id: lineId } });
     return this.recalcProposal(line.proposalId);
   }

@@ -13,6 +13,10 @@ function makePlanPrisma(existingBudget?: { id: string; status: string } | null) 
       create: vi.fn(async ({ data }: any) => ({ id: 'bud-new', status: 'DRAFT', ...data })),
     },
     budgetLine,
+    // cost centers in the fake all belong to the caller's company 'co-1'
+    costCenter: {
+      findFirst: vi.fn(async ({ where }: any) => (where.companyId === 'co-1' ? { id: where.id } : null)),
+    },
   };
   return { prisma, budgetLine };
 }
@@ -197,5 +201,16 @@ describe('BudgetsController.structure — own value + roll-up', () => {
     const child = officeCell(res, 'c');
     expect(child.own).toBe(100);
     expect(child.phased).toBe(true);
+  });
+});
+
+describe('BudgetsController.plan — company scope', () => {
+  it('rejects a cost center of another company', async () => {
+    const { prisma, budgetLine } = makePlanPrisma({ id: 'bud-1', status: 'DRAFT' });
+    const controller = new BudgetsController(prisma as any);
+    await expect(
+      controller.plan('other-co', { year: 2026, costCenterId: 'cc-1', category: 'OFFICE', amount: '1' } as any),
+    ).rejects.toThrow(/costCenterId/);
+    expect(budgetLine.upsert).not.toHaveBeenCalled();
   });
 });

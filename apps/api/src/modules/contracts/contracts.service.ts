@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ContractStatus, Prisma } from '@prisma/client';
+import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { paged } from '../../common/pagination';
 import { NumberSequenceService } from '../master-data/number-sequence.service';
@@ -100,6 +101,7 @@ export class ContractsService {
   }
 
   async create(companyId: string, userId: string, dto: CreateContractDto) {
+    await this.assertReferences(companyId, dto);
     const contract = await this.prisma.$transaction(async (tx) => {
       const contractNumber = await this.sequences.next(
         tx,
@@ -133,6 +135,7 @@ export class ContractsService {
     dto: UpdateContractDto,
   ) {
     await this.get(companyId, id);
+    await this.assertReferences(companyId, dto);
     return this.prisma.contract.update({
       where: { id },
       data: {
@@ -233,5 +236,15 @@ export class ContractsService {
       from: contract.status,
     });
     return updated;
+  }
+
+  /** Partner, owner and framework contract must belong to the active company. */
+  private async assertReferences(
+    companyId: string,
+    dto: { partnerId?: string; ownerId?: string; parentId?: string },
+  ) {
+    await assertReferenceInCompany(dto.partnerId, 'partnerId', inCompany(this.prisma, 'businessPartner', companyId));
+    await assertReferenceInCompany(dto.ownerId, 'ownerId', inCompany(this.prisma, 'employee', companyId));
+    await assertReferenceInCompany(dto.parentId, 'parentId', inCompany(this.prisma, 'contract', companyId));
   }
 }

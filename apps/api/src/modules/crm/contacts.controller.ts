@@ -14,7 +14,8 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
-import { RequirePermission } from '../../core/auth/decorators';
+import { CompanyId, RequirePermission } from '../../core/auth/decorators';
+import { requireInCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 class UpsertContactDto {
@@ -45,9 +46,17 @@ export class ContactsController {
   @Post('partners/:partnerId/contacts')
   @RequirePermission('crm.contacts.create')
   async create(
+    @CompanyId() companyId: string,
     @Param('partnerId') partnerId: string,
     @Body() dto: UpsertContactDto,
   ) {
+    await requireInCompany(
+      this.prisma.businessPartner.findFirst({
+        where: { id: partnerId, companyId, deletedAt: null },
+        select: { id: true },
+      }),
+      'Partner',
+    );
     if (dto.isPrimary) {
       await this.prisma.contact.updateMany({
         where: { partnerId },
@@ -59,11 +68,13 @@ export class ContactsController {
 
   @Patch('contacts/:id')
   @RequirePermission('crm.contacts.update')
-  async update(@Param('id') id: string, @Body() dto: UpdateContactDto) {
+  async update(
+    @CompanyId() companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateContactDto,
+  ) {
+    const contact = await this.findContact(companyId, id);
     if (dto.isPrimary) {
-      const contact = await this.prisma.contact.findUniqueOrThrow({
-        where: { id },
-      });
       await this.prisma.contact.updateMany({
         where: { partnerId: contact.partnerId },
         data: { isPrimary: false },
@@ -75,10 +86,20 @@ export class ContactsController {
   @Delete('contacts/:id')
   @RequirePermission('crm.contacts.delete')
   @HttpCode(204)
-  async remove(@Param('id') id: string) {
+  async remove(@CompanyId() companyId: string, @Param('id') id: string) {
+    await this.findContact(companyId, id);
     await this.prisma.contact.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+  }
+
+  private findContact(companyId: string, id: string) {
+    return requireInCompany(
+      this.prisma.contact.findFirst({
+        where: { id, deletedAt: null, partner: { companyId, deletedAt: null } },
+      }),
+      'Contact',
+    );
   }
 }

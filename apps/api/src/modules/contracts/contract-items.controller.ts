@@ -29,6 +29,7 @@ import {
   CurrentUser,
   RequirePermission,
 } from '../../core/auth/decorators';
+import { requireInCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoicesService } from '../finance/invoices.service';
 
@@ -101,10 +102,13 @@ export class ContractItemsController {
 
   @Patch('obligations/:id/fulfill')
   @RequirePermission('contracts.contracts.update')
-  async fulfillObligation(@Param('id') id: string) {
-    const obligation = await this.prisma.contractObligation.findUniqueOrThrow({
-      where: { id },
-    });
+  async fulfillObligation(@CompanyId() companyId: string, @Param('id') id: string) {
+    const obligation = await requireInCompany(
+      this.prisma.contractObligation.findFirst({
+        where: { id, contract: { companyId } },
+      }),
+      'Obligation',
+    );
     return this.prisma.contractObligation.update({
       where: { id },
       data: {
@@ -152,10 +156,13 @@ export class ContractItemsController {
   @Delete('milestones/:id')
   @RequirePermission('contracts.contracts.update')
   @HttpCode(204)
-  async removeMilestone(@Param('id') id: string) {
-    const milestone = await this.prisma.paymentMilestone.findUniqueOrThrow({
-      where: { id },
-    });
+  async removeMilestone(@CompanyId() companyId: string, @Param('id') id: string) {
+    const milestone = await requireInCompany(
+      this.prisma.paymentMilestone.findFirst({
+        where: { id, contract: { companyId } },
+      }),
+      'Milestone',
+    );
     if (milestone.isInvoiced) {
       throw new UnprocessableEntityException({
         code: 'MILESTONE_INVOICED',
@@ -173,18 +180,18 @@ export class ContractItemsController {
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
   ) {
-    const milestone = await this.prisma.paymentMilestone.findUniqueOrThrow({
-      where: { id },
-      include: { contract: true },
-    });
+    const milestone = await requireInCompany(
+      this.prisma.paymentMilestone.findFirst({
+        where: { id, contract: { companyId } },
+        include: { contract: true },
+      }),
+      'Milestone',
+    );
     if (milestone.isInvoiced) {
       throw new UnprocessableEntityException({
         code: 'MILESTONE_INVOICED',
         message: 'Milestone is already invoiced',
       });
-    }
-    if (milestone.contract.companyId !== companyId) {
-      throw new NotFoundException('Milestone not found');
     }
     if (!milestone.contract.partnerId) {
       throw new UnprocessableEntityException({
@@ -251,6 +258,7 @@ export class ContractItemsController {
   @Patch('variation-orders/:id/status')
   @RequirePermission('contracts.contracts.update')
   async updateVariationOrder(
+    @CompanyId() companyId: string,
     @Param('id') id: string,
     @Body() body: { status: 'SUBMITTED' | 'APPROVED' | 'REJECTED' },
   ) {
@@ -260,10 +268,13 @@ export class ContractItemsController {
         message: 'status must be SUBMITTED, APPROVED or REJECTED',
       });
     }
-    const vo = await this.prisma.variationOrder.findUniqueOrThrow({
-      where: { id },
-      include: { contract: { select: { id: true, value: true } } },
-    });
+    const vo = await requireInCompany(
+      this.prisma.variationOrder.findFirst({
+        where: { id, contract: { companyId } },
+        include: { contract: { select: { id: true, value: true } } },
+      }),
+      'Variation order',
+    );
     if (vo.status === 'APPROVED') {
       throw new UnprocessableEntityException({
         code: 'VO_ALREADY_APPROVED',
@@ -322,6 +333,7 @@ export class ContractItemsController {
   @Patch('claims/:id/status')
   @RequirePermission('contracts.contracts.update')
   async updateClaim(
+    @CompanyId() companyId: string,
     @Param('id') id: string,
     @Body() body: { status: string; settledAmount?: string },
   ) {
@@ -332,6 +344,13 @@ export class ContractItemsController {
         message: `status must be one of ${allowed.join(', ')}`,
       });
     }
+    await requireInCompany(
+      this.prisma.claim.findFirst({
+        where: { id, contract: { companyId } },
+        select: { id: true },
+      }),
+      'Claim',
+    );
     return this.prisma.claim.update({
       where: { id },
       data: {

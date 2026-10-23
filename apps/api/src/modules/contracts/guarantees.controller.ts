@@ -16,6 +16,7 @@ import {
   IsString,
 } from 'class-validator';
 import { CompanyId, RequirePermission } from '../../core/auth/decorators';
+import { assertReferenceInCompany, requireInCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 class CreateGuaranteeDto {
@@ -66,7 +67,10 @@ export class GuaranteesController {
 
   @Post('guarantees')
   @RequirePermission('contracts.guarantees.create')
-  createGuarantee(@Body() dto: CreateGuaranteeDto) {
+  async createGuarantee(@CompanyId() companyId: string, @Body() dto: CreateGuaranteeDto) {
+    await assertReferenceInCompany(dto.contractId, 'contractId', (id) =>
+      this.prisma.contract.findFirst({ where: { id, companyId, deletedAt: null } }),
+    );
     return this.prisma.bankGuarantee.create({
       data: {
         guaranteeNumber: dto.guaranteeNumber,
@@ -82,7 +86,8 @@ export class GuaranteesController {
 
   @Patch('guarantees/:id/status')
   @RequirePermission('contracts.guarantees.update')
-  updateGuarantee(
+  async updateGuarantee(
+    @CompanyId() companyId: string,
     @Param('id') id: string,
     @Body() body: { status: 'ACTIVE' | 'RETURNED' | 'DRAWN' | 'EXPIRED' },
   ) {
@@ -92,6 +97,18 @@ export class GuaranteesController {
         message: 'Invalid guarantee status',
       });
     }
+    // same visibility as the list: own contracts' guarantees plus unassigned ones
+    await requireInCompany(
+      this.prisma.bankGuarantee.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          OR: [{ contract: { companyId } }, { contractId: null }],
+        },
+        select: { id: true },
+      }),
+      'Guarantee',
+    );
     return this.prisma.bankGuarantee.update({
       where: { id },
       data: { status: body.status },

@@ -19,6 +19,7 @@ import {
   Min,
 } from 'class-validator';
 import { CompanyId, RequirePermission } from '../../core/auth/decorators';
+import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { treeOrder } from '../master-data/cost-centers.controller';
 import {
@@ -423,6 +424,7 @@ export class BudgetsController {
   @RequirePermission('finance.budgets.update')
   async plan(@CompanyId() companyId: string, @Body() dto: PlanDto) {
     const field = dto.field ?? 'planned';
+    await assertReferenceInCompany(dto.costCenterId, 'costCenterId', inCompany(this.prisma, 'costCenter', companyId));
     // any cost center is editable (parents carry their own value alongside the
     // roll-up of their children) and any status stays editable — CLOSED is a
     // marker, not a lock; reopen is still one click but no longer required

@@ -88,6 +88,14 @@ export class RolesController {
         'Roles can only be assigned within the active company',
       );
     }
+    if (companyId) {
+      const member = await this.prisma.companyMembership.findFirst({
+        where: { userId: dto.userId, companyId },
+      });
+      if (!member) {
+        throw new NotFoundException('User is not a member of this company');
+      }
+    }
     const assignment = await this.prisma.userRole.create({
       data: { userId: dto.userId, roleId: dto.roleId, companyId },
     });

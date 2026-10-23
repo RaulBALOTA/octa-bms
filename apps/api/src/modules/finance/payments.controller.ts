@@ -19,6 +19,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { CompanyId, RequirePermission } from '../../core/auth/decorators';
+import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
 
@@ -142,6 +143,7 @@ export class PaymentsController {
   @Post('payments')
   @RequirePermission('finance.payments.create')
   async create(@CompanyId() companyId: string, @Body() dto: CreatePaymentDto) {
+    await assertReferenceInCompany(dto.bankAccountId, 'bankAccountId', inCompany(this.prisma, 'bankAccount', companyId));
     const allocatedCents = dto.allocations.reduce(
       (sum, a) => sum + Math.round(Number(a.amount) * 100),
       0,

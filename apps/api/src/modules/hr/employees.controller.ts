@@ -22,6 +22,7 @@ import {
 } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
+import { assertReferenceInCompany, requireInCompany } from '../../common/tenant-scope';
 import { OrgChartService } from './org-chart.service';
 
 class ListEmployeesQuery extends PageQueryDto {
@@ -154,7 +155,8 @@ export class EmployeesController {
 
   @Post()
   @RequirePermission('hr.employees.create')
-  create(@CompanyId() companyId: string, @Body() dto: UpsertEmployeeDto) {
+  async create(@CompanyId() companyId: string, @Body() dto: UpsertEmployeeDto) {
+    await this.assertReferences(companyId, dto);
     return this.prisma.employee.create({
       data: {
         ...dto,
@@ -166,7 +168,19 @@ export class EmployeesController {
 
   @Patch(':id')
   @RequirePermission('hr.employees.update')
-  update(@Param('id') id: string, @Body() dto: UpsertEmployeeDto) {
+  async update(
+    @CompanyId() companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpsertEmployeeDto,
+  ) {
+    await requireInCompany(
+      this.prisma.employee.findFirst({
+        where: { id, companyId, deletedAt: null },
+        select: { id: true },
+      }),
+      'Employee',
+    );
+    await this.assertReferences(companyId, dto);
     return this.prisma.employee.update({
       where: { id },
       data: {
@@ -174,5 +188,26 @@ export class EmployeesController {
         hireDate: dto.hireDate ? new Date(dto.hireDate) : undefined,
       },
     });
+  }
+
+  /** Office, department, manager and position must belong to the active company. */
+  private async assertReferences(companyId: string, dto: UpsertEmployeeDto) {
+    await assertReferenceInCompany(dto.officeId, 'officeId', (id) =>
+      this.prisma.office.findFirst({ where: { id, companyId, deletedAt: null } }),
+    );
+    await assertReferenceInCompany(dto.departmentId, 'departmentId', (id) =>
+      this.prisma.department.findFirst({ where: { id, companyId, deletedAt: null } }),
+    );
+    await assertReferenceInCompany(dto.managerId, 'managerId', (id) =>
+      this.prisma.employee.findFirst({ where: { id, companyId, deletedAt: null } }),
+    );
+    await assertReferenceInCompany(dto.positionId, 'positionId', (id) =>
+      this.prisma.position.findFirst({
+        where: {
+          id,
+          OR: [{ departmentId: null }, { department: { companyId, deletedAt: null } }],
+        },
+      }),
+    );
   }
 }

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OpportunityStage, Prisma } from '@prisma/client';
+import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { paged } from '../../common/pagination';
 import { NumberSequenceService } from '../master-data/number-sequence.service';
@@ -123,6 +124,7 @@ export class OpportunitiesService {
   }
 
   async create(companyId: string, userId: string, dto: CreateOpportunityDto) {
+    await this.assertReferences(companyId, dto);
     const opportunity = await this.prisma.$transaction(async (tx) => {
       const opportunityNumber = await this.sequences.next(
         tx,
@@ -169,6 +171,7 @@ export class OpportunitiesService {
     dto: UpdateOpportunityDto,
   ) {
     await this.get(companyId, id);
+    await this.assertReferences(companyId, dto);
     return this.prisma.opportunity.update({
       where: { id },
       data: {
@@ -232,5 +235,13 @@ export class OpportunitiesService {
       actorId: userId,
     });
     return updated;
+  }
+
+  private async assertReferences(
+    companyId: string,
+    dto: { partnerId?: string; ownerId?: string },
+  ) {
+    await assertReferenceInCompany(dto.partnerId, 'partnerId', inCompany(this.prisma, 'businessPartner', companyId));
+    await assertReferenceInCompany(dto.ownerId, 'ownerId', inCompany(this.prisma, 'employee', companyId));
   }
 }

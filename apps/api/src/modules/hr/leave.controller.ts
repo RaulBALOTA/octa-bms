@@ -20,11 +20,13 @@ import {
 } from 'class-validator';
 import {
   AuthUser,
+  CompanyId,
   CurrentUser,
   RequirePermission,
 } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
+import { requireInCompany } from '../../common/tenant-scope';
 
 class CreateLeaveDto {
   @IsString() employeeId!: string;
@@ -62,9 +64,11 @@ export class LeaveController {
 
   @Get()
   @RequirePermission('hr.leave.read')
-  async list(@Query() query: PageQueryDto) {
+  async list(@CompanyId() companyId: string, @Query() query: PageQueryDto) {
+    const where = { employee: { companyId } };
     const [data, total] = await Promise.all([
       this.prisma.leaveRequest.findMany({
+        where,
         include: {
           employee: {
             select: { id: true, firstName: true, lastName: true },
@@ -74,14 +78,25 @@ export class LeaveController {
         take: query.pageSize,
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.leaveRequest.count(),
+      this.prisma.leaveRequest.count({ where }),
     ]);
     return paged(data, total, query);
   }
 
   @Post()
   @RequirePermission('hr.leave.create')
-  async create(@CurrentUser() user: AuthUser, @Body() dto: CreateLeaveDto) {
+  async create(
+    @CurrentUser() user: AuthUser,
+    @CompanyId() companyId: string,
+    @Body() dto: CreateLeaveDto,
+  ) {
+    await requireInCompany(
+      this.prisma.employee.findFirst({
+        where: { id: dto.employeeId, companyId, deletedAt: null },
+        select: { id: true },
+      }),
+      'Employee',
+    );
     const start = new Date(dto.startDate);
     const end = new Date(dto.endDate);
     if (end < start) {
@@ -150,12 +165,16 @@ export class LeaveController {
   @RequirePermission('hr.leave.approve')
   async decide(
     @CurrentUser() user: AuthUser,
+    @CompanyId() companyId: string,
     @Param('id') id: string,
     @Body() dto: DecideLeaveDto,
   ) {
-    const request = await this.prisma.leaveRequest.findUniqueOrThrow({
-      where: { id },
-    });
+    const request = await requireInCompany(
+      this.prisma.leaveRequest.findFirst({
+        where: { id, employee: { companyId } },
+      }),
+      'Leave request',
+    );
     if (request.status !== 'REQUESTED') {
       throw new UnprocessableEntityException({
         code: 'LEAVE_ALREADY_DECIDED',
@@ -164,14 +183,23 @@ export class LeaveController {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const result = await tx.leaveRequest.update({
-        where: { id },
+      // conditional on REQUESTED so two concurrent decisions cannot both
+      // apply (and book the vacation days twice)
+      const decided = await tx.leaveRequest.updateMany({
+        where: { id, status: 'REQUESTED' },
         data: {
           status: dto.decision,
           approvedById: user.id,
           decidedAt: new Date(),
         },
       });
+      if (decided.count !== 1) {
+        throw new UnprocessableEntityException({
+          code: 'LEAVE_ALREADY_DECIDED',
+          message: 'Request was decided in the meantime',
+        });
+      }
+      const result = await tx.leaveRequest.findUniqueOrThrow({ where: { id } });
       if (dto.decision === 'APPROVED' && request.type === 'VACATION') {
         await tx.leaveBalance.updateMany({
           where: {

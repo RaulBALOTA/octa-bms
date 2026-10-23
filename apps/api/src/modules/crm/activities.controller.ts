@@ -10,9 +10,11 @@ import {
 } from 'class-validator';
 import {
   AuthUser,
+  CompanyId,
   CurrentUser,
   RequirePermission,
 } from '../../core/auth/decorators';
+import { assertReferenceInCompany, requireInCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 class CreateActivityDto {
@@ -37,12 +39,26 @@ export class ActivitiesController {
   @RequirePermission('crm.activities.create')
   async create(
     @CurrentUser() user: AuthUser,
+    @CompanyId() companyId: string,
     @Param('partnerId') partnerId: string,
     @Body() dto: CreateActivityDto,
   ) {
-    // Attribute to the caller's employee profile when one exists.
+    await requireInCompany(
+      this.prisma.businessPartner.findFirst({
+        where: { id: partnerId, companyId, deletedAt: null },
+        select: { id: true },
+      }),
+      'Partner',
+    );
+    await assertReferenceInCompany(dto.contactId, 'contactId', (id) =>
+      this.prisma.contact.findFirst({ where: { id, partnerId, deletedAt: null } }),
+    );
+    await assertReferenceInCompany(dto.opportunityId, 'opportunityId', (id) =>
+      this.prisma.opportunity.findFirst({ where: { id, companyId, deletedAt: null } }),
+    );
+    // Attribute to the caller's employee profile in this company when one exists.
     const employee = await this.prisma.employee.findFirst({
-      where: { userId: user.id, deletedAt: null },
+      where: { userId: user.id, companyId, deletedAt: null },
       select: { id: true },
     });
     return this.prisma.crmActivity.create({

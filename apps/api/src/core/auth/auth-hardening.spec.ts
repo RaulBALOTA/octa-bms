@@ -25,17 +25,17 @@ describe('jwtSecret', () => {
 
 describe('RbacService.getPermissions', () => {
   it('applies only global role assignments when there is no company context', async () => {
-    const findMany = vi.fn(async () => []);
+    const findMany = vi.fn(async (_args: any) => []);
     const rbac = new RbacService({ userRole: { findMany } } as any);
     await rbac.getPermissions('user-1', null);
-    expect(findMany.mock.calls[0][0].where).toEqual({ userId: 'user-1', companyId: null });
+    expect(findMany.mock.calls[0]![0].where).toEqual({ userId: 'user-1', companyId: null });
   });
 
   it('applies global and active-company assignments with a company context', async () => {
-    const findMany = vi.fn(async () => []);
+    const findMany = vi.fn(async (_args: any) => []);
     const rbac = new RbacService({ userRole: { findMany } } as any);
     await rbac.getPermissions('user-1', 'company-a');
-    expect(findMany.mock.calls[0][0].where).toEqual({
+    expect(findMany.mock.calls[0]![0].where).toEqual({
       userId: 'user-1',
       OR: [{ companyId: null }, { companyId: 'company-a' }],
     });
@@ -47,7 +47,7 @@ describe('AuthService.refresh', () => {
     const jwt = new JwtService({ secret: 'test-secret' });
     const prisma = {
       refreshToken: {
-        updateMany: vi.fn(async () => ({ count: rotatedCount })),
+        updateMany: vi.fn(async (_args: any) => ({ count: rotatedCount })),
         findUnique: vi.fn(async () => stored),
         create: vi.fn(async () => ({})),
       },
@@ -65,7 +65,7 @@ describe('AuthService.refresh', () => {
     const pair = await auth.refresh(token);
     expect(pair.accessToken).toBeTruthy();
     expect(prisma.refreshToken.updateMany).toHaveBeenCalledTimes(1);
-    expect(prisma.refreshToken.updateMany.mock.calls[0][0].where).toMatchObject({ revokedAt: null });
+    expect(prisma.refreshToken.updateMany.mock.calls[0]![0].where).toMatchObject({ revokedAt: null });
   });
 
   it('revokes every session when a long-rotated token is replayed', async () => {

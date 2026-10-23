@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:records:postgres": "tsx test/records-crud.postgres.ts",
+    "test:tenant:postgres": "tsx test/tenant-isolation.postgres.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:migrate": "prisma migrate dev",

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PartnerType, Prisma } from '@prisma/client';
+import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
 import { NumberSequenceService } from '../master-data/number-sequence.service';
@@ -83,6 +84,7 @@ export class PartnersService {
   }
 
   async create(companyId: string, userId: string, dto: CreatePartnerDto) {
+    await assertReferenceInCompany(dto.accountManagerId, 'accountManagerId', inCompany(this.prisma, 'employee', companyId));
     const partner = await this.prisma.$transaction(async (tx) => {
       const partnerNumber = await this.sequences.next(
         tx,
@@ -115,6 +117,7 @@ export class PartnersService {
     dto: UpdatePartnerDto,
   ) {
     await this.get(companyId, id);
+    await assertReferenceInCompany(dto.accountManagerId, 'accountManagerId', inCompany(this.prisma, 'employee', companyId));
     return this.prisma.businessPartner.update({
       where: { id },
       data: { ...dto, updatedById: userId },

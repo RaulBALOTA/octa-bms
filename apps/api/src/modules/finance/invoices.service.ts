@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InvoiceStatus, Prisma } from '@prisma/client';
+import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { paged } from '../../common/pagination';
 import { NumberSequenceService } from '../master-data/number-sequence.service';
@@ -88,6 +89,11 @@ export class InvoicesService {
   }
 
   async create(companyId: string, userId: string, dto: CreateInvoiceDto) {
+    await assertReferenceInCompany(dto.partnerId, 'partnerId', inCompany(this.prisma, 'businessPartner', companyId));
+    await assertReferenceInCompany(dto.contractId, 'contractId', inCompany(this.prisma, 'contract', companyId));
+    for (const line of dto.lines) {
+      await assertReferenceInCompany(line.costCenterId, 'costCenterId', inCompany(this.prisma, 'costCenter', companyId));
+    }
     const taxCodes = await this.prisma.taxCode.findMany({
       where: { id: { in: dto.lines.map((l) => l.taxCodeId) } },
     });

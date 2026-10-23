@@ -25,6 +25,7 @@ import {
 } from '../../core/auth/decorators';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PageQueryDto, paged } from '../../common/pagination';
+import { assertReferenceInCompany } from '../../common/tenant-scope';
 import { NotificationsService } from '../notifications/notifications.service';
 
 class UpsertMeetingDto {
@@ -175,6 +176,9 @@ export class MeetingsController {
       where: { id, companyId, deletedAt: null },
     });
     if (!meeting) throw new NotFoundException('Meeting not found');
+    await assertReferenceInCompany(dto.assigneeId, 'assigneeId', (userId) =>
+      this.prisma.companyMembership.findFirst({ where: { userId, companyId } }),
+    );
 
     const task = await this.prisma.task.create({
       data: {
@@ -203,10 +207,21 @@ export class MeetingsController {
 
   @Patch('action-items/:taskId/toggle')
   @RequirePermission('communication.meetings.update')
-  async toggleActionItem(@Param('taskId') taskId: string) {
-    const task = await this.prisma.task.findUniqueOrThrow({
-      where: { id: taskId },
+  async toggleActionItem(
+    @CompanyId() companyId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, entityType: 'meeting' },
     });
+    // action items hang off a meeting by entity reference; scope via the meeting
+    const meeting = task?.entityId
+      ? await this.prisma.meetingMinute.findFirst({
+          where: { id: task.entityId, companyId, deletedAt: null },
+          select: { id: true },
+        })
+      : null;
+    if (!task || !meeting) throw new NotFoundException('Action item not found');
     const done = task.status !== 'DONE';
     return this.prisma.task.update({
       where: { id: taskId },
