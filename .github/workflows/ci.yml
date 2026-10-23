@@ -7,6 +7,9 @@ on:
 
 env:
   DATABASE_URL: postgresql://octa:octa@localhost:5432/octa_bms
+  # throwaway admin for the fresh CI database (seed refuses to run without one)
+  BOOTSTRAP_ADMIN_EMAIL: ci-admin@example.invalid
+  BOOTSTRAP_ADMIN_PASSWORD: ci-only-password-not-secret
 
 jobs:
   quality:
@@ -63,6 +66,12 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Tenant isolation (HTTP against PostgreSQL)
+        run: |
+          PORT=3000 node apps/api/dist/main.js > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3000/api/v1/health && break; sleep 1; done
+          pnpm --filter @octa-bms/api test:tenant:postgres || { cat api.log; exit 1; }
 
       - name: Security audit (non-blocking report)
         run: pnpm audit --audit-level high || true
