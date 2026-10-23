@@ -41,6 +41,7 @@ applied in repositories: `own` (records where user is owner/subject), `team`
 | finance.invoices.out | RCUDE | RA | — | R○ | R | RCUDAE | RCUE | — | — | — | — | — |
 | finance.invoices.in | RCUDE | RA | A○ (own CC) | — | — | RCUDAE | RCUE | — | — | RC | — | — |
 | finance.payments | RCUD | R | — | — | — | RCUDE | RCU | — | — | — | — | — |
+| finance.banking ¹ | RCUDAE | RAE | — | — | — | RCUDAE | — | — | — | — | — | — |
 | finance.budgets | RCUDE | RCUA | R○ | — | — | RCUDE | R | — | — | — | — | — |
 | finance.datev | E | E | — | — | — | E | E | — | — | — | — | — |
 | hr.employees | RCUDE | R | R○ | — | — | — | — | RCUDE | R | — | — | R (directory) ○self |
@@ -62,6 +63,8 @@ applied in repositories: `own` (records where user is owner/subject), `team`
 | identity.users/roles | RCUD | R | — | — | — | — | — | — | — | — | — | — |
 | admin.masterdata | RCUD | R | — | — | — | — | — | — | — | — | — | — |
 | admin.audit | RE | R | — | — | — | — | — | — | R | — | — | — |
+
+¹ `finance.banking` governs managing bank connections inside OCTA. Bank access itself is always read-only; no permission enables payments at a bank. See [banking.md](banking.md).
 
 Notes:
 - **Approval authority follows thresholds**, not just roles: workflow assignee rules consult

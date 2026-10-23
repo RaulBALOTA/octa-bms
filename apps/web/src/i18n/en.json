@@ -1115,5 +1115,54 @@
       "QUALITY": "Quality",
       "DIGITALIZATION": "Digitalization"
     }
+  },
+  "banking": {
+    "nav": "Bank connections",
+    "title": "Bank connections",
+    "readOnly": "Read-only",
+    "readOnlyNote": "OCTA only reads balances and transactions. It cannot initiate payments, transfers or change anything at your bank.",
+    "connect": "Connect bank",
+    "provider": "Bank / connection type",
+    "displayName": "Display name",
+    "notConfigured": "not configured on server",
+    "qontoLogin": "Qonto login (organization identifier)",
+    "qontoSecret": "Qonto secret key",
+    "qontoHint": "Qonto web app → Settings → Integrations & partnerships → API key. The key is stored encrypted and never shown again.",
+    "country": "Country",
+    "bank": "Bank",
+    "consentHint": "You will be redirected to your bank to approve read-only access (account information only). The consent is valid for up to 180 days and can be renewed here.",
+    "connectAndSync": "Connect & sync",
+    "continueToBank": "Continue to bank",
+    "synced": "Synced {{accounts}} account(s), {{lines}} transaction(s)",
+    "syncNow": "Sync now",
+    "renew": "Renew consent",
+    "disconnect": "Disconnect",
+    "confirmDisconnect": "Disconnect this bank? Accounts and imported transactions stay in OCTA as history.",
+    "disconnected": "Bank disconnected",
+    "lastSync": "Last sync",
+    "consentUntil": "Consent valid until",
+    "access": "Access",
+    "empty": "No bank connected yet. Connect Qonto or any other PSD2 bank to import balances and transactions.",
+    "disabledTitle": "Bank connections are not enabled",
+    "disabledHint": "An administrator must apply prisma/sql/add_bank_connections.sql, set BANKING_ENABLED=true and BANKING_ENCRYPTION_KEY in apps/api/.env and restart the API. See docs/banking.md.",
+    "transactions": "Bank transactions",
+    "allAccounts": "All accounts",
+    "bookingDate": "Booked",
+    "counterparty": "Counterparty",
+    "remittance": "Reference",
+    "account": "Account",
+    "amount": "Amount",
+    "consentDeclined": "Bank consent was not granted",
+    "providers": {
+      "QONTO": {
+        "name": "Qonto",
+        "description": "Direct Qonto Business API with your organization API key — read-only."
+      },
+      "ENABLE_BANKING": {
+        "name": "Other bank (PSD2)",
+        "description": "Any European PSD2 bank (Sparkasse, Volksbank, Deutsche Bank, Commerzbank, ING, N26, …) via the licensed aggregator Enable Banking — read-only consent approved at your bank."
+      }
+    },
+    "completing": "Completing bank connection…"
   }
 }

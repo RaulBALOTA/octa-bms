@@ -193,6 +193,9 @@ export function StatusBadge({ value }: { value: string }) {
       RETIRED: 'bg-muted text-muted-foreground',
       WON: 'bg-success/15 text-success',
       LOST: 'bg-destructive/15 text-destructive',
+      PENDING: 'bg-warning/15 text-warning',
+      ERROR: 'bg-destructive/15 text-destructive',
+      REVOKED: 'bg-muted text-muted-foreground',
     }[value] ?? 'bg-muted text-muted-foreground';
   return (
     <span

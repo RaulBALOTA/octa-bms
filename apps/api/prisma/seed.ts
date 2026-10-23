@@ -11,7 +11,7 @@ const MODULES: Record<string, string[]> = {
   crm: ['partners', 'contacts', 'activities'],
   sales: ['opportunities', 'proposals', 'gonogo'],
   contracts: ['contracts', 'guarantees', 'insurance'],
-  finance: ['invoices', 'payments', 'budgets', 'datev'],
+  finance: ['invoices', 'payments', 'banking', 'budgets', 'datev'],
   hr: ['employees', 'leave', 'recruitment', 'reviews', 'trainings'],
   legal: ['cases', 'gdpr', 'compliance', 'whistleblower'],
   procurement: ['requests', 'orders', 'evaluations'],

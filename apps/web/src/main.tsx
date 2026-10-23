@@ -30,6 +30,7 @@ import {
   InsurancePage,
 } from './pages/ContractsExtrasPages';
 import { DatevPage } from './pages/DatevPage';
+import { BankingCallbackPage, BankingPage } from './pages/BankingPage';
 import { OpenItemsPage } from './pages/OpenItemsPage';
 import { OrgChartPage } from './pages/OrgChartPage';
 import { StaffingBudgetPage } from './pages/StaffingBudgetPage';
@@ -121,6 +122,8 @@ const router = createBrowserRouter([
           { path: '/finance/budgets', element: <BudgetsPage /> },
           { path: '/finance/dunning', element: <DunningPage /> },
           { path: '/finance/datev', element: <DatevPage /> },
+          { path: '/finance/banking', element: <BankingPage /> },
+          { path: '/finance/banking/callback', element: <BankingCallbackPage /> },
           { path: '*', element: <ComingSoonPage /> },
         ],
       },

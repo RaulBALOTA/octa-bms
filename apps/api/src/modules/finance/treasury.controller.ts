@@ -106,14 +106,17 @@ export class TreasuryController {
       }),
     ]);
 
+    // bank-synced accounts start from the balance the bank reports
     const startingBalance = accounts.reduce(
       (sum, account) =>
         sum +
-        Number(account.openingBalance) +
-        account.payments.reduce(
-          (s, p) => s + Number(p.amount) * (p.direction === 'IN' ? 1 : -1),
-          0,
-        ),
+        (account.syncedBalance !== null
+          ? Number(account.syncedBalance)
+          : Number(account.openingBalance) +
+            account.payments.reduce(
+              (s, p) => s + Number(p.amount) * (p.direction === 'IN' ? 1 : -1),
+              0,
+            )),
       0,
     );
 

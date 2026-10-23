@@ -23,6 +23,8 @@ Odoo Enterprise · Linear/Notion-grade UX.
 | 09 | [Navigation tree](docs/09-navigation-tree.md) | 19 | [CI/CD pipeline](docs/19-cicd-pipeline.md) |
 | 10 | [Permission matrix](docs/10-permission-matrix.md) | 20 | [Scalability plan](docs/20-scalability-plan.md) |
 
+Feature guides: [Bank connections (read-only, Qonto + PSD2)](docs/banking.md) · [Data management](docs/data-management.md) · [Org chart](docs/org-chart.md) · [Staffing budgets](docs/staffing-budgets.md)
+
 ## Stack
 
 **API** NestJS 10 · Prisma 5 · PostgreSQL 16 · Redis/BullMQ · Meilisearch · MinIO —

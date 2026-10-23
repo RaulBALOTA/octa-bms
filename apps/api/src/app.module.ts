@@ -23,6 +23,7 @@ import { SalesModule } from './modules/sales/sales.module';
 import { HrModule } from './modules/hr/hr.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
 import { FinanceModule } from './modules/finance/finance.module';
+import { BankingModule } from './modules/banking/banking.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SearchModule } from './modules/search/search.module';
 import { AssetsModule } from './modules/assets/assets.module';
@@ -65,6 +66,7 @@ import { CalendarModule } from './modules/business-calendar/calendar.module';
     HrModule,
     ContractsModule,
     FinanceModule,
+    BankingModule,
     NotificationsModule,
     SearchModule,
     AssetsModule,

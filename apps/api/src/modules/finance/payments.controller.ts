@@ -67,12 +67,15 @@ export class PaymentsController {
     });
     return accounts.map(({ payments, ...account }) => ({
       ...account,
+      // accounts synced from the bank API report the bank's own balance
       balance:
-        Number(account.openingBalance) +
-        payments.reduce(
-          (sum, p) => sum + Number(p.amount) * (p.direction === 'IN' ? 1 : -1),
-          0,
-        ),
+        account.syncedBalance !== null
+          ? Number(account.syncedBalance)
+          : Number(account.openingBalance) +
+            payments.reduce(
+              (sum, p) => sum + Number(p.amount) * (p.direction === 'IN' ? 1 : -1),
+              0,
+            ),
     }));
   }
 

@@ -397,6 +397,7 @@ model Company {
   employees        Employee[]
   businessPartners BusinessPartner[]
   bankAccounts     BankAccount[]
+  bankConnections  BankConnection[]
   contracts        Contract[]
   invoices         Invoice[]
   budgets          Budget[]
@@ -681,11 +682,79 @@ model BankAccount {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  company  Company   @relation(fields: [companyId], references: [id])
-  bank     Bank?     @relation(fields: [bankId], references: [id])
-  payments Payment[]
+  // Bank API sync (read-only). Manual accounts leave these empty.
+  connectionId    String?
+  externalId      String? // provider's account id (Qonto bank_account id, PSD2 account uid)
+  syncedBalance   Decimal?  @db.Decimal(18, 2) // balance as reported by the bank
+  syncedBalanceAt DateTime?
 
+  company      Company           @relation(fields: [companyId], references: [id])
+  bank         Bank?             @relation(fields: [bankId], references: [id])
+  connection   BankConnection?   @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  payments     Payment[]
+  transactions BankTransaction[]
+
+  @@unique([connectionId, externalId])
   @@map("bank_accounts")
+}
+
+/// Read-only link to a bank API: a direct bank API (Qonto) or a PSD2 account
+/// information (AIS) aggregator for any other European bank. OCTA never
+/// initiates payments through a connection.
+model BankConnection {
+  id               String    @id @default(cuid())
+  companyId        String
+  provider         String // QONTO | ENABLE_BANKING — see modules/banking/providers
+  displayName      String
+  status           String    @default("PENDING") // PENDING | ACTIVE | EXPIRED | ERROR | REVOKED
+  accessScope      String    @default("READ_ONLY")
+  credentials      String? // AES-256-GCM sealed JSON (API key / PSD2 session); never returned by the API
+  aspspName        String? // PSD2 bank name as listed by the aggregator
+  aspspCountry     String?
+  consentState     String?   @unique // consent redirect state, cleared once consumed
+  consentExpiresAt DateTime?
+  lastSyncAt       DateTime?
+  lastSyncStatus   String? // OK | ERROR
+  lastError        String?
+  createdById      String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  company  Company       @relation(fields: [companyId], references: [id])
+  accounts BankAccount[]
+
+  @@index([companyId])
+  @@map("bank_connections")
+}
+
+/// Bank statement line as imported from the bank. Kept apart from Payment:
+/// importing never settles invoices; reconciliation links a line to a payment.
+model BankTransaction {
+  id               String    @id @default(cuid())
+  bankAccountId    String
+  externalId       String
+  status           String // BOOKED | PENDING
+  bookingDate      DateTime?
+  valueDate        DateTime?
+  amount           Decimal   @db.Decimal(18, 2) // signed: + incoming, - outgoing
+  currencyCode     String    @default("EUR")
+  counterpartyName String?
+  counterpartyIban String?
+  remittanceInfo   String?
+  bankReference    String?
+  raw              Json?
+  paymentId        String? // set by reconciliation (future)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([bankAccountId, externalId])
+  @@index([bankAccountId, bookingDate])
+  @@map("bank_transactions")
 }
 
 model ApprovalGroup {

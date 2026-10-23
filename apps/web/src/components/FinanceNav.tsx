@@ -8,6 +8,7 @@ export function FinanceNav() {
       items={[
         { label: t('finance.title'), to: '/finance/invoices' },
         { label: t('finance.payments'), to: '/finance/payments' },
+        { label: t('banking.nav'), to: '/finance/banking' },
         { label: t('finance.openItems'), to: '/finance/open-items' },
         { label: t('finance.dunning'), to: '/finance/dunning' },
         { label: t('finance.cashflow'), to: '/finance/cashflow' },

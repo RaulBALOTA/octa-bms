@@ -1115,5 +1115,54 @@
       "QUALITY": "Qualität",
       "DIGITALIZATION": "Digitalisierung"
     }
+  },
+  "banking": {
+    "nav": "Bankverbindungen",
+    "title": "Bankverbindungen",
+    "readOnly": "Nur Lesezugriff",
+    "readOnlyNote": "OCTA liest ausschließlich Salden und Umsätze. Zahlungen, Überweisungen oder sonstige Änderungen bei der Bank sind nicht möglich.",
+    "connect": "Bank verbinden",
+    "provider": "Bank / Verbindungsart",
+    "displayName": "Anzeigename",
+    "notConfigured": "auf dem Server nicht konfiguriert",
+    "qontoLogin": "Qonto-Login (Organisationskennung)",
+    "qontoSecret": "Qonto Secret Key",
+    "qontoHint": "Qonto Web-App → Einstellungen → Integrationen & Partnerschaften → API-Schlüssel. Der Schlüssel wird verschlüsselt gespeichert und nie wieder angezeigt.",
+    "country": "Land",
+    "bank": "Bank",
+    "consentHint": "Sie werden zu Ihrer Bank weitergeleitet, um einen reinen Lesezugriff (Kontoinformationsdienst) freizugeben. Die Zustimmung gilt bis zu 180 Tage und kann hier erneuert werden.",
+    "connectAndSync": "Verbinden & abrufen",
+    "continueToBank": "Weiter zur Bank",
+    "synced": "{{accounts}} Konto/Konten, {{lines}} Umsatz/Umsätze abgerufen",
+    "syncNow": "Jetzt abrufen",
+    "renew": "Zustimmung erneuern",
+    "disconnect": "Trennen",
+    "confirmDisconnect": "Diese Bankverbindung trennen? Konten und importierte Umsätze bleiben als Historie in OCTA.",
+    "disconnected": "Bankverbindung getrennt",
+    "lastSync": "Letzter Abruf",
+    "consentUntil": "Zustimmung gültig bis",
+    "access": "Zugriff",
+    "empty": "Noch keine Bank verbunden. Verbinden Sie Qonto oder eine andere PSD2-Bank, um Salden und Umsätze zu importieren.",
+    "disabledTitle": "Bankverbindungen sind nicht aktiviert",
+    "disabledHint": "Ein Administrator muss prisma/sql/add_bank_connections.sql ausführen, BANKING_ENABLED=true und BANKING_ENCRYPTION_KEY in apps/api/.env setzen und die API neu starten. Siehe docs/banking.md.",
+    "transactions": "Bankumsätze",
+    "allAccounts": "Alle Konten",
+    "bookingDate": "Gebucht",
+    "counterparty": "Gegenpartei",
+    "remittance": "Verwendungszweck",
+    "account": "Konto",
+    "amount": "Betrag",
+    "consentDeclined": "Die Zustimmung bei der Bank wurde nicht erteilt",
+    "providers": {
+      "QONTO": {
+        "name": "Qonto",
+        "description": "Direkte Qonto Business API mit dem API-Schlüssel Ihrer Organisation – nur Lesezugriff."
+      },
+      "ENABLE_BANKING": {
+        "name": "Andere Bank (PSD2)",
+        "description": "Jede europäische PSD2-Bank (Sparkasse, Volksbank, Deutsche Bank, Commerzbank, ING, N26, …) über den lizenzierten Aggregator Enable Banking – Lesezugriff, den Sie bei Ihrer Bank freigeben."
+      }
+    },
+    "completing": "Bankverbindung wird abgeschlossen…"
   }
 }
