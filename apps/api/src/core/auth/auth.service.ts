@@ -151,6 +151,11 @@ export class AuthService {
     return { ...user, memberships, permissions };
   }
 
+  /** Lifetime of refresh tokens (and of the browser session cookie). */
+  refreshTtlSeconds(): number {
+    return Number(process.env.JWT_REFRESH_TTL ?? 604_800);
+  }
+
   /** Public token issuance for SSO flows (OIDC callback). */
   issueTokensFor(userId: string, email: string) {
     return this.issueTokens(userId, email);
@@ -161,7 +166,7 @@ export class AuthService {
       { sub: userId, email, type: 'access' },
       { expiresIn: Number(process.env.JWT_ACCESS_TTL ?? 900) },
     );
-    const refreshTtl = Number(process.env.JWT_REFRESH_TTL ?? 604_800);
+    const refreshTtl = this.refreshTtlSeconds();
     const refreshToken = await this.jwt.signAsync(
       { sub: userId, email, type: 'refresh', jti: randomUUID() },
       { expiresIn: refreshTtl },

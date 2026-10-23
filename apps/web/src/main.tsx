@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { StrictMode, useEffect } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import {
   createBrowserRouter,
@@ -63,11 +64,27 @@ function RequireAuth() {
   const accessToken = useAuthStore((s) => s.accessToken);
   const me = useAuthStore((s) => s.me);
   const loadMe = useAuthStore((s) => s.loadMe);
+  const tryRefresh = useAuthStore((s) => s.tryRefresh);
+  // access tokens live in memory only: after a reload, restore the session
+  // from the httpOnly cookie before deciding the user is signed out
+  const [restoring, setRestoring] = useState(!accessToken);
+
+  useEffect(() => {
+    if (accessToken || !restoring) return;
+    void tryRefresh().finally(() => setRestoring(false));
+  }, [accessToken, restoring, tryRefresh]);
 
   useEffect(() => {
     if (accessToken && !me) void loadMe();
   }, [accessToken, me, loadMe]);
 
+  if (!accessToken && restoring) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        <Loader2 size={16} className="animate-spin" />
+      </div>
+    );
+  }
   if (!accessToken) return <Navigate to="/login" replace />;
   return <Outlet />;
 }

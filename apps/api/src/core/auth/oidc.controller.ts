@@ -3,13 +3,21 @@ import {
   Get,
   Logger,
   Query,
+  Req,
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { randomBytes } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
+import {
+  clearOidcStateCookie,
+  OIDC_STATE_COOKIE,
+  readCookie,
+  setOidcStateCookie,
+  setRefreshCookie,
+} from './auth-cookies';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { Public } from './decorators';
@@ -25,8 +33,6 @@ import { Public } from './decorators';
 export class OidcController {
   private readonly logger = new Logger(OidcController.name);
   private jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
-  // short-lived anti-CSRF state store (single instance; Redis when scaled out)
-  private readonly pendingStates = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -64,12 +70,10 @@ export class OidcController {
         message: 'Entra SSO is not configured',
       });
     }
+    // anti-CSRF state bound to this browser via a 10-minute cookie, so any
+    // API replica can complete the callback
     const state = randomBytes(24).toString('base64url');
-    this.pendingStates.set(state, Date.now());
-    // prune states older than 10 minutes
-    for (const [key, created] of this.pendingStates) {
-      if (Date.now() - created > 600_000) this.pendingStates.delete(key);
-    }
+    setOidcStateCookie(res, state);
 
     const params = new URLSearchParams({
       client_id: config.clientId,
@@ -88,6 +92,7 @@ export class OidcController {
     @Query('code') code: string,
     @Query('state') state: string,
     @Query('error') error: string | undefined,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
     const config = this.config;
@@ -97,7 +102,9 @@ export class OidcController {
       this.logger.warn(`OIDC callback error: ${error}`);
       return res.redirect(`${config.appUrl}/login?sso=failed`);
     }
-    if (!state || !this.pendingStates.delete(state)) {
+    const expectedState = readCookie(req, OIDC_STATE_COOKIE);
+    clearOidcStateCookie(res);
+    if (!state || !expectedState || !sameSecret(state, expectedState)) {
       return res.redirect(`${config.appUrl}/login?sso=state`);
     }
 
@@ -213,9 +220,15 @@ export class OidcController {
     });
 
     const pair = await this.auth.issueTokensFor(user.id, user.email);
-    // hand tokens to the SPA via URL fragment (never sent to any server)
-    res.redirect(
-      `${config.appUrl}/oidc#accessToken=${encodeURIComponent(pair.accessToken)}&refreshToken=${encodeURIComponent(pair.refreshToken)}`,
-    );
+    // the session travels as the httpOnly cookie; the SPA's /oidc page then
+    // obtains its access token through /auth/refresh
+    setRefreshCookie(res, pair.refreshToken, this.auth.refreshTtlSeconds());
+    res.redirect(`${config.appUrl}/oidc`);
   }
+}
+
+function sameSecret(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
 }

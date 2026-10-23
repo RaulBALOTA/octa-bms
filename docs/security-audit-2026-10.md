@@ -75,30 +75,65 @@ PostgreSQL. It fails on the previous code and now runs in CI.
 - **CI.** The seed step now has bootstrap admin credentials; it needs them on
   a fresh database.
 
-## Open — needs a product or schema decision
+## Follow-up — resolved
 
-1. **Documents are not company-scoped.**
-   - `Document` has no `companyId`, `Folder.companyId` is optional and never
-     set, and every document and folder endpoint is global. This includes
-     downloads of contract files.
-   - Recommended: add `companyId` to `Document`, set it on folders, backfill
-     from `Folder` / `entityType`+`entityId`, then scope every endpoint.
-2. **Legal and insurance are not company-scoped.** `LegalCase`,
-   `ComplianceItem`, `DataProcessingActivity`, `WhistleblowerReport`,
-   `ProfessionalLicense` and `InsurancePolicy` have no `companyId`. They need
-   the same migration as documents.
-3. **Global catalogs are editable by any company's admin.** This applies to
-   `EmailTemplate`, knowledge articles and categories, and `Role` creation
-   with any permission codes. Decide whether these are group-wide (then
-   require a system admin) or per company (then add `companyId`).
-4. **Office endpoints check the wrong company.**
-   `master/companies/:companyId/offices*` checks membership of the route
-   company, but permissions are resolved for the `X-Company-Id` company.
-5. **Tokens live in `localStorage`.** Any XSS exposes them. Consider httpOnly
-   refresh cookies.
-6. **The OIDC state store is in-process.** SSO breaks behind more than one
-   API replica. Move it to Redis together with the RBAC cache.
-7. **`pnpm lint` cannot run.** ESLint is not installed and there is no
-   config. CI does not run lint.
-8. **`test/records-crud.postgres.ts` fails** on `assets.categoryId` with no
-   reference data. This predates the audit.
+Each point the first pass left open:
+
+1. **Documents are company-scoped.**
+   - `Folder` and `Document` carry a `companyId`. Every document and folder
+     endpoint filters by the active company, including download, preview,
+     bulk move/delete and upload of new versions.
+   - New folders and documents, including contract files, record their
+     company.
+2. **Legal and insurance are company-scoped.** The same applies to
+   `LegalCase`, `ComplianceItem`, `DataProcessingActivity`,
+   `WhistleblowerReport`, `ProfessionalLicense` and `InsurancePolicy`.
+   - `prisma/sql/add_company_scope_documents_legal.sql` (idempotent)
+     attributes existing rows from:
+     - the only company, on single-company installs
+     - folder ancestry
+     - the linked contract, invoice, partner, employee, asset, opportunity or
+       proposal
+     - a legal case's partner
+   - Unattributable rows stay hidden from company users and are counted for
+     manual assignment.
+3. **Global catalogs follow the permission matrix**
+   (`docs/10-permission-matrix.md`):
+   - Creating roles and editing email templates now requires a system
+     administrator, via a new `@SystemAdminOnly()` guard. The web app hides
+     template editing for everyone else.
+   - Knowledge articles stay a group-wide wiki on purpose: search indexes them
+     as `shared`, and publishing requires `knowledge.articles.approve`.
+4. **Company and office changes** must target the active company, which is
+   where the caller's permissions were resolved. Being a plain member of
+   another company no longer carries admin rights over to it.
+5. **Tokens no longer live in `localStorage`.**
+   - The refresh token is an httpOnly, `SameSite=Strict` cookie on
+     `/api/v1/auth`. The access token is kept in memory and restored from the
+     cookie on reload.
+   - Sessions saved by older builds are exchanged for the cookie once.
+   - Non-browser clients can opt into body tokens with
+     `X-Auth-Transport: body`.
+   - SSO no longer puts tokens in the URL.
+6. **The OIDC state is a short-lived httpOnly cookie** compared in constant
+   time, so SSO works with any number of API replicas.
+   - The RBAC permission cache stays in-process. With several replicas, a role
+     change made on one replica reaches the others within its 60 s TTL.
+7. **Lint works.**
+   - ESLint 9 and typescript-eslint use a shared flat config
+     (`eslint.config.mjs`).
+   - The five real findings are fixed.
+   - `pnpm lint` runs in CI.
+8. **`test/records-crud.postgres.ts` passes.** Asset categories were only
+   seeded in demo mode, so on a real install no asset could be created (the
+   category is required). They are now seeded as reference data.
+
+Verification:
+- `pnpm typecheck`, `pnpm lint` and `pnpm test` pass.
+- All 67 Playwright e2e tests pass.
+- These PostgreSQL suites pass:
+  - `tenant-isolation` (now also covering documents, legal, insurance,
+    catalogs and company settings)
+  - `records-crud`
+  - `org-chart --http`
+  - `company-calendar.integration`

@@ -380,7 +380,7 @@ export class ContractItemsController {
     let fileId: string | undefined;
     if (file) {
       if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
-      const storageKey = `${randomUUID()}-${file.originalname.replace(/[^\w.\-]/g, '_')}`;
+      const storageKey = `${randomUUID()}-${file.originalname.replace(/[^\w.-]/g, '_')}`;
       writeFileSync(join(UPLOAD_DIR, storageKey), file.buffer);
       const document = await this.prisma.document.create({
         data: {

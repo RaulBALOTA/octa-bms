@@ -63,6 +63,13 @@ For an explicitly disposable demo environment, use
 `pnpm --filter @octa-bms/api prisma:seed:demo`. Only this opt-in mode adds sample
 companies and demo accounts (password `ChangeMe!2026`).
 
+**Upgrading an existing database:** after `pnpm db:push`, run the reviewed data
+migrations in `apps/api/prisma/sql/` that your database has not seen yet —
+in particular `add_company_scope_documents_legal.sql`, which attributes
+existing documents, folders, legal and insurance records to their company
+(`psql "$DATABASE_URL" -f apps/api/prisma/sql/add_company_scope_documents_legal.sql`).
+Its last query counts rows it could not attribute; assign those manually.
+
 Full containerized stack: `docker compose --profile full up -d --build` → web at
 `http://localhost:8080`.
 

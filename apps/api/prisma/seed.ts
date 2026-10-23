@@ -141,6 +141,18 @@ async function main() {
     await prisma.contractTypeRef.upsert({ where: { code: ct.code }, update: {}, create: ct });
   }
 
+  // reference data: assets cannot be created without a category
+  const assetCategories = [
+    { code: 'IT-NB', name: 'Notebook', depreciationYears: 3 },
+    { code: 'IT-PH', name: 'Phone', depreciationYears: 3 },
+    { code: 'VEH', name: 'Vehicle', depreciationYears: 6 },
+    { code: 'FURN', name: 'Furniture', depreciationYears: 13 },
+    { code: 'MEAS', name: 'Measuring Equipment', depreciationYears: 8, requiresCalibration: true },
+  ];
+  for (const ac of assetCategories) {
+    await prisma.assetCategory.upsert({ where: { code: ac.code }, update: {}, create: ac });
+  }
+
   if (!process.argv.includes('--demo') && process.env.OCTA_SEED_DEMO !== '1') {
     const admins = await prisma.user.count({ where: { isSystemAdmin: true, isActive: true, deletedAt: null } });
     if (!admins) {
@@ -154,17 +166,6 @@ async function main() {
     }
     console.log('Reference data and admin access ready. No demo companies or business records were created.');
     return;
-  }
-
-  const assetCategories = [
-    { code: 'IT-NB', name: 'Notebook', depreciationYears: 3 },
-    { code: 'IT-PH', name: 'Phone', depreciationYears: 3 },
-    { code: 'VEH', name: 'Vehicle', depreciationYears: 6 },
-    { code: 'FURN', name: 'Furniture', depreciationYears: 13 },
-    { code: 'MEAS', name: 'Measuring Equipment', depreciationYears: 8, requiresCalibration: true },
-  ];
-  for (const ac of assetCategories) {
-    await prisma.assetCategory.upsert({ where: { code: ac.code }, update: {}, create: ac });
   }
 
   // ----------------------------------------------------------------- company

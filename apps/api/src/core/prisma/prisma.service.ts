@@ -62,6 +62,8 @@ export class PrismaService
   }
 
   private buildExtendedClient() {
+    // the query callbacks below run with their own `this`; they need the base client
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const base = this;
     return this.$extends({
       query: {

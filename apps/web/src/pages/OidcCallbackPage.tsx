@@ -5,28 +5,24 @@ import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth';
 
 /**
- * Landing route for the Entra SSO redirect. The API puts the token pair in
- * the URL fragment (never sent to any server); we store it and enter the app.
+ * Landing route for the Entra SSO redirect. The API has already put the
+ * session into the httpOnly cookie; exchange it for an access token and enter
+ * the app. No tokens ever appear in the URL.
  */
 export function OidcCallbackPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.hash.slice(1));
-    const accessToken = params.get('accessToken');
-    const refreshToken = params.get('refreshToken');
-    window.history.replaceState(null, '', '/oidc'); // scrub tokens from history
-
-    if (accessToken && refreshToken) {
-      useAuthStore.setState({ accessToken, refreshToken });
-      void useAuthStore
-        .getState()
-        .loadMe()
-        .then(() => navigate('/', { replace: true }));
-    } else {
-      navigate('/login?sso=missing', { replace: true });
-    }
+    void (async () => {
+      const { tryRefresh, loadMe } = useAuthStore.getState();
+      if (await tryRefresh()) {
+        await loadMe();
+        navigate('/', { replace: true });
+      } else {
+        navigate('/login?sso=missing', { replace: true });
+      }
+    })();
   }, [navigate]);
 
   return (

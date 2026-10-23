@@ -26,7 +26,12 @@ export function hasPermission(me: Me | null, code: string): boolean {
 }
 
 interface AuthState {
+  /** Short-lived; kept in memory only and restored from the session cookie. */
   accessToken: string | null;
+  /**
+   * Only set while migrating a session stored by an older build in
+   * localStorage; exchanged once for the httpOnly cookie, then dropped.
+   */
   refreshToken: string | null;
   companyId: string | null;
   me: Me | null;
@@ -54,14 +59,12 @@ export const useAuthStore = create<AuthState>()(
         const res = await fetch('/api/v1/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
           body: JSON.stringify({ email, password }),
         });
         if (!res.ok) throw new Error('Login failed');
-        const tokens = (await res.json()) as {
-          accessToken: string;
-          refreshToken: string;
-        };
-        set({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+        const { accessToken } = (await res.json()) as { accessToken: string };
+        set({ accessToken, refreshToken: null });
         await get().loadMe();
       },
 
@@ -85,19 +88,21 @@ export const useAuthStore = create<AuthState>()(
 
       tryRefresh() {
         refreshInFlight ??= (async () => {
-          const { refreshToken } = get();
-          if (!refreshToken) return false;
+          // the session cookie is sent automatically; a legacy stored token
+          // is sent once so the server can move it into the cookie
+          const legacy = get().refreshToken;
           const res = await fetch('/api/v1/auth/refresh', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken }),
+            credentials: 'same-origin',
+            body: JSON.stringify(legacy ? { refreshToken: legacy } : {}),
           }).catch(() => null);
-          if (!res?.ok) return false;
-          const tokens = (await res.json()) as {
-            accessToken: string;
-            refreshToken: string;
-          };
-          set({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
+          if (!res?.ok) {
+            set({ accessToken: null, refreshToken: null });
+            return false;
+          }
+          const { accessToken } = (await res.json()) as { accessToken: string };
+          set({ accessToken, refreshToken: null });
           return true;
         })().finally(() => {
           refreshInFlight = null;
@@ -110,25 +115,33 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout() {
-        const { refreshToken } = get();
-        // revoke the session server-side too; local state is cleared either way
-        if (refreshToken) {
-          void fetch('/api/v1/auth/logout', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken }),
-          }).catch(() => undefined);
-        }
+        const legacy = get().refreshToken;
+        // revoke the session server-side (and clear its cookie); local state
+        // is cleared either way
+        void fetch('/api/v1/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(legacy ? { refreshToken: legacy } : {}),
+        }).catch(() => undefined);
         set({ accessToken: null, refreshToken: null, me: null, companyId: null });
       },
     }),
     {
       name: 'octa-bms-auth',
-      partialize: (s) => ({
-        accessToken: s.accessToken,
-        refreshToken: s.refreshToken,
-        companyId: s.companyId,
-      }),
+      // tokens never touch localStorage; only the selected company persists
+      partialize: (s) => ({ companyId: s.companyId }),
+      // Sessions saved by older builds still hold tokens: take them into
+      // memory (the refresh token is swapped for the cookie on first use).
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<AuthState>;
+        return {
+          ...current,
+          companyId: saved.companyId ?? null,
+          accessToken: saved.accessToken ?? null,
+          refreshToken: saved.refreshToken ?? null,
+        };
+      },
     },
   ),
 );

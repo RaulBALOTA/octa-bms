@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PartnerType, Prisma } from '@prisma/client';
 import { assertReferenceInCompany, inCompany } from '../../common/tenant-scope';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { PageQueryDto, paged } from '../../common/pagination';
+import { paged } from '../../common/pagination';
 import { NumberSequenceService } from '../master-data/number-sequence.service';
 import { CreatePartnerDto, ListPartnersQuery, UpdatePartnerDto } from './dto';
 

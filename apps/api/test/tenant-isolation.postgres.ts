@@ -20,6 +20,7 @@ const companyIds: string[] = [];
 const userIds: string[] = [];
 let roleId: string | undefined;
 let contractTypeId: string | undefined;
+let templateId: string | undefined;
 
 async function main() {
   try {
@@ -52,6 +53,15 @@ async function main() {
     const meetingB = await db.meetingMinute.create({ data: { companyId: b.id, title: 'Foreign meeting', meetingDate: new Date(), content: '-' } });
     const taskB = await db.task.create({ data: { title: 'Foreign action', assigneeId: outsider.id, creatorId: outsider.id, entityType: 'meeting', entityId: meetingB.id } });
     const costCenterB = await db.costCenter.create({ data: { companyId: b.id, code: `CC-${nonce}`, name: 'Foreign cost center' } });
+
+    const folderB = await db.folder.create({ data: { companyId: b.id, name: `Foreign ${nonce}`, path: `/Foreign ${nonce}` } });
+    const documentB = await db.document.create({ data: { companyId: b.id, folderId: folderB.id, name: 'foreign.pdf' } });
+    const caseB = await db.legalCase.create({ data: { companyId: b.id, caseNumber: `LC-${nonce}`, title: 'Foreign case', type: 'LITIGATION' } });
+    const complianceB = await db.complianceItem.create({ data: { companyId: b.id, category: 'GDPR', title: 'Foreign compliance' } });
+    const insuranceB = await db.insurancePolicy.create({ data: { companyId: b.id, policyNumber: `INS-${nonce}`, type: 'CYBER', insurer: 'Foreign insurer' } });
+    const officeB = await db.office.create({ data: { companyId: b.id, code: `OF-${nonce}`, name: 'Foreign office' } });
+    const template = await db.emailTemplate.create({ data: { code: `ISO-${nonce}`, name: 'Shared template', subjectDe: 'x', subjectEn: 'x', bodyDe: 'x', bodyEn: 'x' } });
+    templateId = template.id;
 
     // company A control records
     const partnerA = await db.businessPartner.create({ data: { companyId: a.id, partnerNumber: `C-A-${nonce}`, type: 'CLIENT', name: 'Own client' } });
@@ -101,6 +111,38 @@ async function main() {
     await expectStatus(403, 'POST', '/identity/roles/assign', { userId: admin.id, roleId: role.id });
     await expectStatus(403, 'POST', '/identity/roles/assign', { userId: outsider.id, roleId: role.id, companyId: b.id });
 
+    // documents, legal and insurance belong to their company
+    await expectStatus(404, 'GET', `/documents/${documentB.id}/download`);
+    await expectStatus(404, 'PATCH', `/documents/${documentB.id}/title`, { title: 'Hijacked' });
+    await expectStatus(404, 'POST', '/documents/bulk-delete', { ids: [documentB.id] });
+    await expectStatus(404, 'PATCH', `/documents/folders/${folderB.id}`, { parentId: null });
+    await expectStatus(404, 'DELETE', `/documents/folders/${folderB.id}`);
+    await expectStatus(404, 'POST', '/documents/folders', { name: 'Inside foreign', parentId: folderB.id });
+    await expectStatus(404, 'PATCH', `/legal/cases/${caseB.id}`, { title: 'Hijacked' });
+    await expectStatus(404, 'PATCH', `/legal/compliance-items/${complianceB.id}`, { title: 'Hijacked' });
+    await expectStatus(400, 'POST', '/legal/cases', { caseNumber: `LC-A-${nonce}`, title: 'Against foreign partner', type: 'LITIGATION', partnerId: partnerB.id });
+    const folders = await expectStatus(200, 'GET', '/documents/folders');
+    assert.ok(!folders.body.some((row: { id: string }) => row.id === folderB.id), 'folder list leaks company B');
+    const documents = await expectStatus(200, 'GET', '/documents?pageSize=200');
+    assert.ok(!documents.body.data.some((row: { id: string }) => row.id === documentB.id), 'document list leaks company B');
+    const cases = await expectStatus(200, 'GET', '/legal/cases?pageSize=200');
+    assert.ok(!cases.body.data.some((row: { id: string }) => row.id === caseB.id), 'legal case list leaks company B');
+    const compliance = await expectStatus(200, 'GET', '/legal/compliance-items?pageSize=200');
+    assert.ok(!compliance.body.data.some((row: { id: string }) => row.id === complianceB.id), 'compliance list leaks company B');
+    const insurance = await expectStatus(200, 'GET', '/contracts/insurance');
+    assert.ok(!insurance.body.some((row: { id: string }) => row.id === insuranceB.id), 'insurance list leaks company B');
+    const ownFolder = await expectStatus(201, 'POST', '/documents/folders', { name: `Own ${nonce}` });
+    assert.equal(ownFolder.body.companyId, a.id);
+
+    // group-wide catalogs need a system administrator
+    await expectStatus(403, 'POST', '/identity/roles', { code: `ISO-NEW-${nonce}`, name: 'x', permissionCodes: [] });
+    await expectStatus(403, 'PATCH', `/communication/email-templates/${template.id}`, { name: 'Hijacked' });
+
+    // membership in B does not carry A's admin rights over to B
+    await db.companyMembership.create({ data: { userId: admin.id, companyId: b.id } });
+    await expectStatus(403, 'PATCH', `/master/companies/${b.id}`, { name: 'Hijacked' });
+    await expectStatus(403, 'PATCH', `/master/companies/${b.id}/offices/${officeB.id}`, { name: 'Hijacked' });
+
     // lists only show the active company
     const leave = await expectStatus(200, 'GET', '/hr/leave-requests');
     assert.ok(!leave.body.data.some((row: { id: string }) => row.id === leaveB.id), 'leave list leaks company B');
@@ -117,8 +159,16 @@ async function main() {
     assert.equal((await db.leaveRequest.findUniqueOrThrow({ where: { id: leaveB.id } })).status, 'REQUESTED');
     assert.equal((await db.task.findUniqueOrThrow({ where: { id: taskB.id } })).status, 'OPEN');
     assert.equal((await db.user.findUniqueOrThrow({ where: { id: outsider.id } })).isActive, true);
+    assert.equal((await db.document.findUniqueOrThrow({ where: { id: documentB.id } })).deletedAt, null);
+    assert.equal((await db.document.findUniqueOrThrow({ where: { id: documentB.id } })).title, null);
+    assert.equal((await db.folder.findUniqueOrThrow({ where: { id: folderB.id } })).deletedAt, null);
+    assert.equal((await db.legalCase.findUniqueOrThrow({ where: { id: caseB.id } })).title, 'Foreign case');
+    assert.equal((await db.complianceItem.findUniqueOrThrow({ where: { id: complianceB.id } })).title, 'Foreign compliance');
+    assert.equal((await db.emailTemplate.findUniqueOrThrow({ where: { id: template.id } })).name, 'Shared template');
+    assert.equal((await db.company.findUniqueOrThrow({ where: { id: b.id } })).name, 'Isolation test B');
+    assert.equal((await db.office.findUniqueOrThrow({ where: { id: officeB.id } })).name, 'Foreign office');
 
-    console.log('Tenant isolation checks passed: by-id access, foreign keys, role grants and lists are confined to the active company.');
+    console.log('Tenant isolation checks passed: by-id access, foreign keys, documents, legal, insurance, role grants, shared catalogs, company settings and lists are confined to the active company.');
   } finally {
     // Only explicitly tracked temporary fixtures are removed.
     await db.$transaction(async (tx) => {
@@ -137,6 +187,13 @@ async function main() {
       await tx.budget.deleteMany({ where });
       await tx.costCenter.deleteMany({ where });
       await tx.employee.deleteMany({ where });
+      await tx.document.deleteMany({ where });
+      await tx.folder.deleteMany({ where });
+      await tx.legalCase.deleteMany({ where });
+      await tx.complianceItem.deleteMany({ where });
+      await tx.insurancePolicy.deleteMany({ where });
+      await tx.office.deleteMany({ where });
+      if (templateId) await tx.emailTemplate.deleteMany({ where: { id: templateId } });
       await tx.businessPartner.deleteMany({ where });
       await tx.notification.deleteMany({ where: { userId: { in: userIds } } });
       await tx.auditLog.deleteMany({ where: { OR: [where, { userId: { in: userIds } }] } });

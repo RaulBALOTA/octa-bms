@@ -32,7 +32,7 @@ function CompanyCalendarWorkspace() {
   const [savedViews, setSavedViews] = useState<{ name: string; query: string }[]>(() => {
     try { const saved: unknown = JSON.parse(localStorage.getItem(savedKey) ?? '[]'); return Array.isArray(saved) ? saved.filter((row): row is { name: string; query: string } => typeof row?.name === 'string' && typeof row?.query === 'string').slice(0, 20) : []; } catch { return []; }
   });
-  const update = (key: string, value: string) => { const next = new URLSearchParams(params); value ? next.set(key, value) : next.delete(key); if (key !== 'page') next.delete('page'); setParams(next); };
+  const update = (key: string, value: string) => { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); if (key !== 'page') next.delete('page'); setParams(next); };
   const base = new URLSearchParams(); for (const key of ['search', 'domain', 'status', 'owner']) { const value = params.get(key); if (value) base.set(key, value); }
   const query = new URLSearchParams(base); const days = calendarDays(anchor, mode);
   const year = Number(anchor.slice(0, 4));

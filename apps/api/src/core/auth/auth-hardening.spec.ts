@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { RbacService } from '../rbac/rbac.service';
 import { AuthService } from './auth.service';
 import { jwtSecret } from './jwt-secret';
+import { readCookie } from './auth-cookies';
+import { OidcController } from './oidc.controller';
 
 describe('jwtSecret', () => {
   it('falls back to the dev secret outside production', () => {
@@ -81,5 +83,42 @@ describe('AuthService.refresh', () => {
     const { auth, prisma, token } = setup({ userId: 'user-1', revokedAt: new Date() }, 0);
     await expect(auth.refresh(token)).rejects.toBeInstanceOf(UnauthorizedException);
     expect(prisma.refreshToken.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('session cookies', () => {
+  it('reads one cookie out of a cookie header', () => {
+    const req = { headers: { cookie: 'a=1; octa_refresh=tok%3Den; b=2' } } as any;
+    expect(readCookie(req, 'octa_refresh')).toBe('tok=en');
+    expect(readCookie(req, 'missing')).toBeUndefined();
+    expect(readCookie({ headers: {} } as any, 'octa_refresh')).toBeUndefined();
+  });
+});
+
+describe('OidcController state', () => {
+  const env = { ENTRA_TENANT_ID: 't', ENTRA_CLIENT_ID: 'c', ENTRA_CLIENT_SECRET: 's' };
+  function fakeRes() {
+    return { cookie: vi.fn(), clearCookie: vi.fn(), redirect: vi.fn() };
+  }
+
+  it('binds the state to the browser with a cookie instead of server memory', () => {
+    Object.assign(process.env, env);
+    const controller = new OidcController({} as any, {} as any);
+    const res = fakeRes();
+    controller.login(res as any);
+    const state = new URL(res.redirect.mock.calls[0]![0]).searchParams.get('state');
+    expect(res.cookie).toHaveBeenCalledWith('octa_oidc_state', state, expect.objectContaining({ httpOnly: true, sameSite: 'lax' }));
+  });
+
+  it.each([undefined, 'other-state'])('rejects a callback whose state cookie is %s', async (cookieState) => {
+    Object.assign(process.env, env);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const controller = new OidcController({} as any, {} as any);
+    const res = fakeRes();
+    const req = { headers: { cookie: cookieState ? `octa_oidc_state=${cookieState}` : '' } };
+    await controller.callback('code', 'expected-state', undefined, req as any, res as any);
+    expect(res.redirect).toHaveBeenCalledWith(expect.stringContaining('sso=state'));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });

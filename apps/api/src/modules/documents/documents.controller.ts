@@ -338,7 +338,7 @@ export class DocumentsController {
     }
     if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
 
-    const storageKey = `${randomUUID()}-${file.originalname.replace(/[^\w.\-]/g, '_')}`;
+    const storageKey = `${randomUUID()}-${file.originalname.replace(/[^\w.-]/g, '_')}`;
     writeFileSync(join(UPLOAD_DIR, storageKey), file.buffer);
     const checksum = createHash('sha256').update(file.buffer).digest('hex');
 
