@@ -1154,7 +1154,7 @@
     "setup": {
       "title": "Bank connections are not ready yet",
       "flag": "The feature is switched off on the server: set BANKING_ENABLED=true in apps/api/.env (or your server settings) and restart the API.",
-      "key": "The encryption key is missing or invalid: set BANKING_ENCRYPTION_KEY to the output of “openssl rand -base64 32” and restart the API.",
+      "key": "The encryption key is missing or invalid. BANKING_ENCRYPTION_KEY is a random key OCTA uses to encrypt stored bank credentials — not your bank's API key (that one is entered in the “Connect bank” form). Generate it with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\", put it in apps/api/.env and restart the API.",
       "oldApi": "The API server is still running an older version without bank connections. Run “pnpm install” and “pnpm db:generate”, then stop and restart the API (Docker: rebuild the api container) and reload this page.",
       "noRead": "Your role cannot see bank connections yet. An administrator runs “pnpm banking:setup --apply” in apps/api (adds the banking permissions to existing roles); then reload this page.",
       "viewOnlyTitle": "View only",

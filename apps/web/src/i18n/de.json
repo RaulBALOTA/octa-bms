@@ -1154,7 +1154,7 @@
     "setup": {
       "title": "Bankverbindungen sind noch nicht eingerichtet",
       "flag": "Die Funktion ist auf dem Server ausgeschaltet: BANKING_ENABLED=true in apps/api/.env (bzw. den Server-Einstellungen) setzen und die API neu starten.",
-      "key": "Der Verschlüsselungsschlüssel fehlt oder ist ungültig: BANKING_ENCRYPTION_KEY auf die Ausgabe von „openssl rand -base64 32“ setzen und die API neu starten.",
+      "key": "Der Verschlüsselungsschlüssel fehlt oder ist ungültig. BANKING_ENCRYPTION_KEY ist ein zufälliger Schlüssel, mit dem OCTA gespeicherte Bankzugangsdaten verschlüsselt – nicht der API-Schlüssel Ihrer Bank (der wird im Formular „Bank verbinden“ eingegeben). Erzeugen mit: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\", in apps/api/.env eintragen und die API neu starten.",
       "oldApi": "Der API-Server läuft noch mit einer älteren Version ohne Bankverbindungen. „pnpm install“ und „pnpm db:generate“ ausführen, dann die API stoppen und neu starten (Docker: api-Container neu bauen) und diese Seite neu laden.",
       "noRead": "Ihre Rolle darf Bankverbindungen noch nicht sehen. Ein Administrator führt in apps/api „pnpm banking:setup --apply“ aus (ergänzt die Bank-Berechtigungen bestehender Rollen); danach diese Seite neu laden.",
       "viewOnlyTitle": "Nur Ansicht",
