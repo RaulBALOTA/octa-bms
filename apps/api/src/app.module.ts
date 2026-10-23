@@ -5,7 +5,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
-import { LOG_REDACTION } from './core/security/log-redaction';
+import { LOG_REDACTION, serializeRequest } from './core/security/log-redaction';
 
 import { PrismaModule } from './core/prisma/prisma.module';
 import { AuthModule } from './core/auth/auth.module';
@@ -49,6 +49,7 @@ import { CalendarModule } from './modules/business-calendar/calendar.module';
             ? { target: 'pino-pretty', options: { singleLine: true } }
             : undefined,
         redact: LOG_REDACTION,
+        serializers: { req: serializeRequest },
       },
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),

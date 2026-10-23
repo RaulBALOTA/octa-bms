@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { IsEmail, IsOptional, IsString, Length, Matches, MaxLength, MinLength } from 'class-validator';
 import type { Response } from 'express';
@@ -179,11 +179,11 @@ export class AuthController {
       const policy = await this.policy.get();
       const existing = await this.mfa.activeAuthenticator(req.user.id);
       if (policy.mfaMode === 'DISABLED' && !existing) throw new AuthError('FORBIDDEN', 'MFA enrollment is disabled by policy');
-      if (existing) {
-        const verifiedAt = req.authSession.lastMfaAt;
-        if (!verifiedAt || Date.now() - verifiedAt.getTime() > this.config.mfa.stepUpMaxAgeMinutes * 60_000) {
-          throw new AuthError('STEP_UP_REQUIRED', undefined, { method: 'totp', maxAgeMinutes: this.config.mfa.stepUpMaxAgeMinutes });
-        }
+      // replacing a factor needs the current factor; a first factor needs the password —
+      // otherwise a hijacked session could bind the attacker's authenticator to the account
+      const verifiedAt = existing ? req.authSession.lastMfaAt : req.authSession.lastReauthAt;
+      if (!verifiedAt || Date.now() - verifiedAt.getTime() > this.config.mfa.stepUpMaxAgeMinutes * 60_000) {
+        throw new AuthError('STEP_UP_REQUIRED', undefined, { method: existing ? 'totp' : 'password', maxAgeMinutes: this.config.mfa.stepUpMaxAgeMinutes });
       }
       return req.user.id;
     }
@@ -316,10 +316,12 @@ export class AuthController {
     await this.tokens.resetPassword(dto.token, dto.password, req);
   }
 
+  /** POST so the token never appears in URLs, access logs or Referer headers. */
   @Public()
-  @Get('invitations/preview')
-  previewInvitation(@Query() query: TokenQuery, @Req() req: AuthenticatedRequest) {
-    return this.tokens.previewInvitation(query.token, req);
+  @Post('invitations/preview')
+  @HttpCode(200)
+  previewInvitation(@Body() dto: TokenQuery, @Req() req: AuthenticatedRequest) {
+    return this.tokens.previewInvitation(dto.token, req);
   }
 
   @Public()

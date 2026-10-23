@@ -58,7 +58,7 @@ const SELF_SERVICE = [
 ];
 const PUBLIC = [
   'POST /auth/login', 'GET /auth/state', 'POST /auth/logout', 'POST /auth/password/forgot', 'POST /auth/password/reset',
-  'GET /auth/invitations/preview', 'POST /auth/invitations/accept', 'GET /auth/config',
+  'POST /auth/invitations/preview', 'POST /auth/invitations/accept', 'GET /auth/config',
   'GET /auth/oidc/status', 'GET /auth/oidc/login', 'GET /auth/oidc/callback', 'GET /health',
 ];
 
@@ -111,7 +111,7 @@ describe('#20 invitations', () => {
     expect(outbox.at(-1)!.to).toBe('new.hire@octa.test');
 
     const anon = client(t);
-    expect((await anon.get(`/auth/invitations/preview?token=${token}`)).body).toMatchObject({ email: 'new.hire@octa.test', companyName: 'Company A' });
+    expect((await anon.post('/auth/invitations/preview', { token })).body).toMatchObject({ email: 'new.hire@octa.test', companyName: 'Company A' });
     expect((await anon.post('/auth/invitations/accept', { token, firstName: 'New', lastName: 'Hire', password: 'password1234' })).status).toBe(400);
     expect((await anon.post('/auth/invitations/accept', { token, firstName: 'New', lastName: 'Hire', password: PASSWORD })).status).toBe(201);
     expect((await anon.post('/auth/invitations/accept', { token, firstName: 'Evil', lastName: 'Twin', password: PASSWORD })).status).toBe(400);

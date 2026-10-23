@@ -5,9 +5,18 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/ui';
 import { AuthRequestError, safeNext, useAuthStore } from '../../stores/auth';
+import { requestStepUp } from '../../stores/step-up';
 import { AuthCard, FormError, LabeledInput, Notice, OtpInput, PasswordInput, RecoveryCodesPanel } from './components';
 
 interface ErrorBody { code?: string; message?: string; retryAfterSeconds?: number; attemptsRemaining?: number }
+
+/** Runs a signed-in enrollment call, prompting for step-up (password or code) once if required. */
+async function withStepUp<T>(call: () => ReturnType<typeof authPost<T>>) {
+  const first = await call();
+  if (first.ok || first.body.code !== 'STEP_UP_REQUIRED') return first;
+  const method = (first.body as { method?: 'totp' | 'password' }).method ?? 'password';
+  return (await requestStepUp(method)) ? call() : first;
+}
 
 /** POST for the sign-in flow: sends the CSRF token of the current challenge/session, never retries. */
 export async function authPost<T>(path: string, body?: unknown): Promise<{ ok: boolean; status: number; body: T & ErrorBody }> {
@@ -247,10 +256,10 @@ export function SetupMfaPage() {
   async function start() {
     setError(null);
     setBusy(true);
-    const res = await authPost<EnrollmentStart>('/auth/mfa/enroll/start');
+    const res = await withStepUp(() => authPost<EnrollmentStart>('/auth/mfa/enroll/start'));
     setBusy(false);
     if (res.ok) setEnrollment(res.body);
-    else if (res.body.code === 'STEP_UP_REQUIRED') navigate('/security', { replace: true });
+    else if (res.body.code === 'STEP_UP_REQUIRED') setError(t('auth.stepUp.invalid'));
     else setError(res.body.code === 'MFA_CHALLENGE_INVALID' ? t('auth.mfa.expired') : res.body.message ?? t('auth.setup.expired'));
   }
 
@@ -259,7 +268,7 @@ export function SetupMfaPage() {
     if (!enrollment) return;
     setBusy(true);
     setError(null);
-    const res = await authPost<{ status: 'AUTHENTICATED'; csrfToken: string; recoveryCodes: string[] }>('/auth/mfa/enroll/confirm', { enrollmentId: enrollment.enrollmentId, code });
+    const res = await withStepUp(() => authPost<{ status: 'AUTHENTICATED'; csrfToken: string; recoveryCodes: string[] }>('/auth/mfa/enroll/confirm', { enrollmentId: enrollment.enrollmentId, code }));
     setBusy(false);
     setCode('');
     if (!res.ok) {
@@ -393,9 +402,9 @@ export function AcceptInvitePage() {
     enabled: !!token,
     retry: false,
     queryFn: async () => {
-      const res = await fetch(`/api/v1/auth/invitations/preview?token=${encodeURIComponent(token!)}`);
+      const res = await authPost<{ email: string; companyName: string }>('/auth/invitations/preview', { token });
       if (!res.ok) throw new Error('invalid');
-      return (await res.json()) as { email: string; companyName: string };
+      return res.body;
     },
   });
   const [form, setForm] = useState({ firstName: '', lastName: '', password: '' });

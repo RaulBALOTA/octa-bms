@@ -169,6 +169,18 @@ describe('#2 #3 #4 #5 #6 #7 Microsoft Authenticator TOTP', () => {
     expect(JSON.stringify(status.body)).not.toMatch(/[2-9A-HJ-NP-Z]{5}-[2-9A-HJ-NP-Z]{5}/);
   });
 
+  it('a session without recent password re-entry cannot bind a first authenticator', async () => {
+    const c = await signedIn(t, w.users.staffA2.email);
+    await t.db.authSession.updateMany({ where: { userId: w.users.staffA2.id, revokedAt: null }, data: { lastReauthAt: new Date(Date.now() - 11 * 60_000) } });
+    const res = await c.post('/auth/mfa/enroll/start');
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ code: 'STEP_UP_REQUIRED', method: 'password' });
+    expect(JSON.stringify(res.body)).not.toMatch(/qrSvg|manualKey/);
+    const up = await c.post('/auth/step-up/verify', { password: PASSWORD });
+    c.csrf = up.body.csrfToken;
+    expect((await c.post('/auth/mfa/enroll/start')).status).toBe(200);
+  });
+
   it('QR/enrollment is unreachable before the password step', async () => {
     const anon = client(t);
     const res = await anon.post('/auth/mfa/enroll/start');

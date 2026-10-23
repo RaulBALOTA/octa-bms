@@ -15,3 +15,13 @@ export const LOG_REDACTION = {
   ],
   censor: '[redacted]',
 };
+
+/**
+ * Request serializer: logs the path without its query string (OIDC `code`/`state`, any
+ * token someone put in a URL) and never the parsed query object.
+ */
+export function serializeRequest(req: Record<string, unknown>) {
+  const url = typeof req.url === 'string' ? req.url.split('?')[0] : req.url;
+  const { query: _query, ...rest } = req;
+  return { ...rest, url };
+}
